@@ -1857,6 +1857,85 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 
 /* ============================================================
+   RESPONSIVE — phone-only polish (exact complement of the
+   min-width:900px "wider screens" block below — nothing here should
+   ever be visible at ≥900px). Addresses three specific complaints on
+   phone-class widths: the ha/time chip row wrapping to two lines, the
+   toolbar's filter/search/map buttons wrapping in whatever order they
+   happen to fit, and the map overview opening in normal flow below
+   the full (possibly long) list instead of staying in view.
+   ============================================================ */
+@media (max-width: 899px) {
+  /* Header: min-width:0 overrides the default min-width:auto a flex
+     item gets — without it, .header-user refuses to shrink below its
+     own content's natural width (dot+name+badge+switch+logout), which
+     pushed "Odjava" straight off the right edge of the screen instead
+     of ever actually wrapping or truncating. Combined with tighter
+     gaps and hiding the admin view switch's text label ("Admin"/
+     "Uporabnik" — redundant with the track/thumb position itself, and
+     with the static "Admin" badge next to the name), name + badge +
+     switch + logout stop crowding each other. */
+  .header-user { gap: 5px; min-width: 0; }
+  .header-name { max-width: 72px; }
+  .header-logo { height: 22px; }
+  .admin-view-switch { gap: 0; }
+  .admin-view-switch-label { display: none; }
+  .header-user .btn-sm { padding: 0 10px; }
+
+  /* Work order toolbar: switched from flex to plain block flow. The
+     flex version let .wo-ha-summary's percentage flex-basis resolve
+     against an indefinite ancestor main-size (a well-known flexbox
+     pitfall once nested flex:1 containers + flex-wrap are involved),
+     so the chip row silently grew to its full content width instead
+     of the row's actual available width — pulling the whole toolbar,
+     and with it the page, into horizontal overflow. Block layout has
+     no equivalent ambiguity: percentages resolve against the (always
+     definite) containing block, full stop.
+     Result: the ha/time chips get their own full-width, horizontally-
+     scrollable row (no more wrapping to a second line), the search
+     box gets its own full-width row below that, and the filter/show-
+     deleted/map buttons — left as normal inline-block <button>s —
+     wrap naturally on whatever's left, same as any flowing text. */
+  .wo-toolbar { display: block; min-width: 0; }
+  .wo-ha-summary {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    width: 100%;
+    margin: 0 0 8px;
+  }
+  .wo-ha-summary::-webkit-scrollbar { display: none; }
+  .wo-search-wrap { display: block; width: 100%; margin: 8px 0; }
+  .wo-search-input, .wo-search-input:focus { width: 100%; }
+  .wo-status-filter-wrap, #woMapFilterClearBtn, .wo-show-deleted-btn {
+    margin: 0 8px 8px 0;
+  }
+
+  /* Map overview: pinned to the bottom of the screen as soon as it's
+     toggled on, instead of sitting below the list in normal flow —
+     visible immediately, no scrolling past the list required. z-index
+     80 keeps it under the FAB (90) and any modal (200), same reasoning
+     as the position+z-index already on .wo-list-map-wrap. */
+  .wo-list-layout--map-active #woOverviewMapWrap {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    /* dvh, not vh — matches this file's existing convention (see
+       .modal-sheet/.planning-shell) for correctness against iOS
+       Safari's collapsing address bar, which a static vh doesn't track. */
+    height: 45dvh;
+    max-height: 45dvh;
+    margin-top: 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    box-shadow: 0 -4px 16px rgba(0,0,0,.18);
+    z-index: 80;
+  }
+  .wo-list-layout--map-active #workOrdersList { padding-bottom: 45dvh; }
+}
+
+
+/* ============================================================
    RESPONSIVE — wider screens
    ============================================================ */
 @media (min-width: 480px) {
