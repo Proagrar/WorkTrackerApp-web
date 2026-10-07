@@ -1388,6 +1388,33 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   box-shadow: 0 0 0 3px rgba(28,69,146,.15);
 }
 .wo-search-input::placeholder { color: var(--text-muted); }
+/* Room on the right for the clear ✕ below, so typed text never runs under it. */
+.wo-search-input { padding-right: 30px; }
+
+/* Clear (✕) inside the customer search box — shown only while it has
+   text, see updateWoSearchClearBtn() in app.js. */
+.wo-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-primary);
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.wo-search-clear:hover { background: var(--text-muted); color: #fff; }
+.wo-search-clear[hidden] { display: none; }
 
 
 /* ── States ─────────────────────────────────────────────────── */

@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.9';
+const APP_VERSION = 'v3.91';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -128,6 +128,7 @@ const woHaChipIzvedeno = document.getElementById('woHaChipIzvedeno');
 const woHaChipPlan = document.getElementById('woHaChipPlan');
 const woHaChipTime = document.getElementById('woHaChipTime');
 const woSearchStranka = document.getElementById('woSearchStranka');
+const woSearchClearBtn = document.getElementById('woSearchClearBtn');
 const woStatusFilterBtn  = document.getElementById('woStatusFilterBtn');
 const woStatusFilterMenu = document.getElementById('woStatusFilterMenu');
 let woStatusFilterValues = new Set(); // empty = no filter, show all statuses
@@ -4362,7 +4363,19 @@ async function bulkDeleteSelectedWorkOrders(btn) {
   await loadWorkOrders();
 }
 
-woSearchStranka.addEventListener('input', () => { renderWorkOrders(); showWoSearchSuggestions(); });
+function updateWoSearchClearBtn() {
+  woSearchClearBtn.hidden = !woSearchStranka.value;
+}
+
+woSearchStranka.addEventListener('input', () => { updateWoSearchClearBtn(); renderWorkOrders(); showWoSearchSuggestions(); });
+// ✕ inside the search box — one tap back to the unfiltered list. Doesn't
+// refocus the input on purpose, so the phone keyboard doesn't pop up.
+woSearchClearBtn.addEventListener('click', () => {
+  woSearchStranka.value = '';
+  woSearchSuggestions.hidden = true;
+  updateWoSearchClearBtn();
+  renderWorkOrders();
+});
 woSearchStranka.addEventListener('focus', showWoSearchSuggestions);
 woSearchStranka.addEventListener('blur', () => {
   setTimeout(() => { woSearchSuggestions.hidden = true; }, 150);
@@ -4372,6 +4385,7 @@ woSearchSuggestions.addEventListener('mousedown', e => {
   if (!item) return;
   woSearchStranka.value = item.dataset.name;
   woSearchSuggestions.hidden = true;
+  updateWoSearchClearBtn();
   renderWorkOrders();
 });
 
