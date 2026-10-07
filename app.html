@@ -102,6 +102,10 @@
               <span class="wo-ha-chip wo-ha-chip--plan" id="woHaChipPlan"></span>
               <span class="wo-ha-chip wo-ha-chip--time" id="woHaChipTime"></span>
             </div>
+            <!-- Groups the filter/map buttons so the phone layout can keep
+                 them on one row; display:contents on desktop, so there it
+                 changes nothing. -->
+            <div class="wo-toolbar-buttons">
             <div class="wo-status-filter-wrap">
               <button type="button" id="woStatusFilterBtn" class="btn btn-secondary btn-sm wo-status-filter-btn">Vsi statusi</button>
               <div id="woStatusFilterMenu" class="wo-status-filter-menu" hidden>
@@ -134,6 +138,7 @@
             <!-- Available to every user — opens the map overview
                  panel, see woMapOverviewActive in app.js. -->
             <button type="button" id="woMapToggleBtn" class="btn btn-secondary btn-sm wo-show-deleted-btn">🗺 Zemljevid</button>
+            </div>
             <div class="wo-search-wrap">
               <input type="text" id="woSearchStranka" class="wo-search-input" placeholder="Išči stranko..." autocomplete="off">
               <ul id="woSearchSuggestions" class="gerk-suggestions" hidden></ul>
@@ -156,6 +161,7 @@
           <div id="woOverviewMapWrap" class="wo-list-map-wrap" hidden>
             <div id="woOverviewMap" class="wo-list-map"></div>
             <button type="button" id="woOverviewMapLayersBtn" class="wo-map-layers-btn wo-map-layers-btn--overview" aria-pressed="false" title="Prikaži/skrij ceste in imena krajev">🛣 Ceste/imena</button>
+            <button type="button" id="woOverviewMapCloseBtn" class="wo-map-close-btn" title="Zapri zemljevid" aria-label="Zapri zemljevid">✕</button>
           </div>
         </div>
       </section>

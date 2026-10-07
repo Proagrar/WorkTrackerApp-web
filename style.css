@@ -1278,6 +1278,11 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .wo-status-filter-wrap { position: relative; flex-shrink: 0; }
 
+/* Layout-only grouping of the filter/map buttons — invisible to the
+   desktop flex row (display:contents), turned into a single
+   non-wrapping row in the phone block below. */
+.wo-toolbar-buttons { display: contents; }
+
 /* Pushed flush left within the toolbar (auto margin eats the remaining
    space on its line), so the three chips sit right next to the filter
    controls that change them, with the actual buttons staying
@@ -1705,7 +1710,31 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .wo-map-layers-btn:hover { background: #fff; }
 .wo-map-layers-btn[aria-pressed="true"] { background: var(--blue-800); color: #fff; }
 .wo-map-layers-btn[aria-pressed="true"]:hover { background: var(--blue-800); }
-.wo-map-layers-btn--overview { top: 8px; }
+/* left:54px clears Leaflet's zoom +/- control (10px margin + 34px wide)
+   in the same top-left corner — at left:8px the two overlapped. */
+.wo-map-layers-btn--overview { top: 10px; left: 54px; }
+
+/* Close (✕) in the overview map's top-right corner — same action as the
+   "Skrij zemljevid" toolbar button, so the map can be closed without
+   scrolling back up to the toolbar. */
+.wo-map-close-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .9);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.wo-map-close-btn:hover { background: #fff; }
 .wo-map-layers-btn--detail { top: 44px; }
 
 /* Expanded map mode — the button toggles this class on .wo-detail-layout.
@@ -1909,8 +1938,22 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .wo-ha-summary::-webkit-scrollbar { display: none; }
   .wo-search-wrap { display: block; width: 100%; margin: 8px 0; }
   .wo-search-input, .wo-search-input:focus { width: 100%; }
-  .wo-status-filter-wrap, #woMapFilterClearBtn, .wo-show-deleted-btn {
-    margin: 0 8px 8px 0;
+  /* Filter/archive/map buttons on one row: no wrapping — buttons shrink
+     and ellipsize instead when a fourth one (✕ Prekliči filter) shows
+     up. Deliberately not overflow-x:auto: that would clip the status
+     filter's dropdown menu, which hangs below this row. */
+  .wo-toolbar-buttons {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin: 0 0 8px;
+  }
+  .wo-toolbar-buttons > * { flex: 0 1 auto; min-width: 0; }
+  .wo-toolbar-buttons .btn-sm {
+    max-width: 100%;
+    padding: 0 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Map overview: pinned to the bottom of the screen as soon as it's
@@ -1924,14 +1967,14 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     /* dvh, not vh — matches this file's existing convention (see
        .modal-sheet/.planning-shell) for correctness against iOS
        Safari's collapsing address bar, which a static vh doesn't track. */
-    height: 45dvh;
-    max-height: 45dvh;
+    height: 35dvh;
+    max-height: 35dvh;
     margin-top: 0;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
     box-shadow: 0 -4px 16px rgba(0,0,0,.18);
     z-index: 80;
   }
-  .wo-list-layout--map-active #workOrdersList { padding-bottom: 45dvh; }
+  .wo-list-layout--map-active #workOrdersList { padding-bottom: 35dvh; }
 }
 
 

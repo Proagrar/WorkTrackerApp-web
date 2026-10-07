@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.8';
+const APP_VERSION = 'v3.9';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -157,6 +157,7 @@ const woListLayout     = document.getElementById('woListLayout');
 const woOverviewMapWrap = document.getElementById('woOverviewMapWrap');
 const woOverviewMapEl  = document.getElementById('woOverviewMap');
 const woOverviewMapLayersBtn = document.getElementById('woOverviewMapLayersBtn');
+const woOverviewMapCloseBtn  = document.getElementById('woOverviewMapCloseBtn');
 let woMapOverviewActive = false;
 let woOverviewMap = null;
 let woOverviewLabelsLayer = null; // roads/borders/place-names overlay — off by default, see ensureWoOverviewMap
@@ -4128,7 +4129,11 @@ function updateWoMapToggleButton() {
   // Available to every user, not just admins — unlike woShowDeletedBtn.
   woMapToggleBtn.hidden = false;
   woMapToggleBtn.classList.toggle('wo-show-deleted-btn--active', woMapOverviewActive);
-  woMapToggleBtn.textContent = woMapOverviewActive ? '◀ Skrij zemljevid' : '🗺 Zemljevid';
+  // On phones the label stays short (the map has its own ✕ in the
+  // corner and the button's active color already says it's open) so
+  // all toolbar buttons fit on one row.
+  const isPhone = window.matchMedia('(max-width: 899px)').matches;
+  woMapToggleBtn.textContent = woMapOverviewActive && !isPhone ? '◀ Skrij zemljevid' : '🗺 Zemljevid';
   woMapToggleBtn.title = woMapOverviewActive ? 'Skrij pregled na zemljevidu' : 'Prikaži polja delovnih nalogov na zemljevidu';
 }
 
@@ -4292,6 +4297,12 @@ woMapToggleBtn.addEventListener('click', async () => {
   woOverviewMap.invalidateSize();
   if (!workOrdersGerkShapesLoaded) await loadWorkOrdersGerkShapes();
   renderWoMapOverview();
+});
+
+// ✕ in the map's corner — reuses the toolbar toggle so closing goes
+// through the exact same path (map-click filter cleared, label reset).
+woOverviewMapCloseBtn.addEventListener('click', () => {
+  if (woMapOverviewActive) woMapToggleBtn.click();
 });
 
 woOverviewMapLayersBtn.addEventListener('click', () => {
