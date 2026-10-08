@@ -1964,7 +1964,14 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   }
   .wo-ha-summary::-webkit-scrollbar { display: none; }
   .wo-search-wrap { display: block; width: 100%; margin: 8px 0; }
-  .wo-search-input, .wo-search-input:focus { width: 100%; }
+  /* 16px, not the desktop .8125rem (13px) — below 16px, iOS Safari
+     auto-zooms the whole page in on focus (its own accessibility
+     behavior, not something JS can suppress) and never zooms back out
+     on blur, which left the just-added ✕ clear button (and everything
+     else) shifted out of view until the user manually pinch-zoomed
+     back out. 16px is the documented threshold where iOS stops doing
+     this — not a cosmetic choice. */
+  .wo-search-input, .wo-search-input:focus { width: 100%; font-size: 16px; }
   /* Filter/archive/map buttons on one row: no wrapping — buttons shrink
      and ellipsize instead when a fourth one (✕ Prekliči filter) shows
      up. Deliberately not overflow-x:auto: that would clip the status
