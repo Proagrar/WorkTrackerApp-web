@@ -2340,6 +2340,18 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   color: var(--text-secondary);
 }
 
+/* Customer-name suggestions reuse .gerk-suggestion-code (shared with the
+   GERK-code autocomplete elsewhere), but names aren't codes — the
+   monospace/bold/15px styling sized for short codes like "688697" read as
+   oversized for names like "Kmetija Novak". Scoped to this one dropdown
+   only; GERK-code suggestions elsewhere keep their original styling. */
+#woSearchSuggestions .gerk-suggestion-code {
+  font-size: .8125rem;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
 .gerk-suggestion-item--add .gerk-suggestion-code {
   font-family: inherit;
   font-weight: 600;
