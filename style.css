@@ -2035,8 +2035,15 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .tab-bar { justify-content: flex-start; }
   .tab-btn { flex: 0 0 auto; min-width: 180px; }
 
-  .wo-search-input       { width: 220px; }
-  .wo-search-input:focus { width: 260px; }
+  .wo-search-input { width: 220px; }
+  /* Not 260px: the toolbar (ha chips + filter/map buttons + this box) sits
+     right at the edge of .app-main's 1100px cap, so growing the box by 40px
+     on focus tipped it over and wrapped the whole row to a second line —
+     every time, at virtually every real desktop window width (reproduced
+     from ~1088px up through 1920px). Focus still gets the border/shadow
+     treatment from the base .wo-search-input:focus rule, just no width
+     change here. */
+  .wo-search-input:focus { width: 220px; }
 
   .header-name { max-width: 240px; }
 
