@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.94';
+const APP_VERSION = 'v3.95';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -2794,7 +2794,7 @@ function stopLocationTracking() {
 function updateLocationStatusDot() {
   const fresh = lastPositionReceivedAt != null && (Date.now() - lastPositionReceivedAt) <= 15000;
   locationStatusDot.classList.toggle('location-status-dot--active', fresh);
-  locationStatusDot.title = fresh ? 'Sledenje lokaciji: aktivno' : 'Sledenje lokaciji: lokacija ni dosegljiva';
+  locationStatusDot.title = fresh ? 'GPS sprejem — deluje' : 'GPS sprejem — ne deluje';
 }
 
 async function sendLocationPing() {
