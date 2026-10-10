@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.95';
+const APP_VERSION = 'v3.96';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -63,6 +63,7 @@ const woAssignCustomerWrap        = document.getElementById('woAssignCustomerWra
 const woAssignCustomerInput       = document.getElementById('woAssignCustomerInput');
 const woAssignCustomerSuggestions = document.getElementById('woAssignCustomerSuggestions');
 const workLogDateInput = document.getElementById('workLogDate');
+const workLogDateDisplay = document.getElementById('workLogDateDisplay');
 const woIzvajalecEdit = document.getElementById('woIzvajalecEdit');
 const woPlanDateWrap = document.getElementById('woPlanDateWrap');
 const woPlanDateInput = document.getElementById('woPlanDate');
@@ -192,6 +193,12 @@ const declLinksList          = document.getElementById('declLinksList');
 const declTableWrap          = document.getElementById('declTableWrap');
 const declAddCustomerBtn     = document.getElementById('declAddCustomerBtn');
 let declCustomerId = null;
+
+// ── Poročila (reports) modal refs ───────────────────────────────
+const reportsModal      = document.getElementById('reportsModal');
+const reportsModalClose = document.getElementById('reportsModalClose');
+const reportsError      = document.getElementById('reportsError');
+const reportsListWrap   = document.getElementById('reportsListWrap');
 
 // ── Operators (Izvajalci) modal refs ────────────────────────────
 const operatorsModal      = document.getElementById('operatorsModal');
@@ -835,6 +842,18 @@ function fmtSampleDate(isoDate) {
   return `${parseInt(d, 10)}.${parseInt(m, 10)}.${y}`;
 }
 
+// workLogDateInput's value, mirrored into #workLogDateDisplay in the
+// Slovenian d.m.yyyy format (see the overlay comment on #workLogDate in
+// app.html) — every place that sets workLogDateInput.value goes through
+// this instead, so the overlay never falls out of sync with it.
+function setWorkLogDate(value) {
+  workLogDateInput.value = value;
+  updateWorkLogDateDisplay();
+}
+function updateWorkLogDateDisplay() {
+  workLogDateDisplay.textContent = fmtSampleDate(workLogDateInput.value);
+}
+
 // Same, but as a value an <input type="time"> will accept.
 function toTimeInputValue(iso) {
   if (!iso) return '';
@@ -1274,7 +1293,7 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   // itself now doubles as that editor), so a hover tooltip fills the gap.
   workLogDateInput.max   = currentDetailPlanIsHeaderDate ? '' : todayISO();
   workLogDateInput.title = currentDetailPlanIsHeaderDate ? 'Planirano (datum iz koledarja Planiranje)' : '';
-  workLogDateInput.value = currentDetailDate;
+  setWorkLogDate(currentDetailDate);
 
   woAddExistingGerkCode.value = '';
   if (isAdminView()) loadCustomerGerkDatalist(workOrder.stranka_id); // fire-and-forget
@@ -1320,7 +1339,7 @@ async function loadPlanDateForDetail(workOrderId, planId) {
   const row = planId ? rows.find(r => String(r.id) === String(planId)) : (rows.length === 1 ? rows[0] : null);
   currentDetailPlanId = row?.id ?? null;
   currentDetailPlanDate = row?.plan_date ?? null;
-  if (currentDetailPlanIsHeaderDate && currentDetailPlanDate) workLogDateInput.value = currentDetailPlanDate;
+  if (currentDetailPlanIsHeaderDate && currentDetailPlanDate) setWorkLogDate(currentDetailPlanDate);
   updateOrderHeader();
 }
 
@@ -1925,17 +1944,19 @@ async function loadDetailForDate() {
 // (merging into that day's log if one already exists there), so
 // entering hours and picking the date can happen in either order.
 workLogDateInput.addEventListener('change', async () => {
+  updateWorkLogDateDisplay(); // the native picker just set .value itself — sync the overlay before anything else runs
+
   // Header-date mode (opened from a specific Planiranje calendar entry):
   // this field edits delovni_nalogi_planiranje.plan_date, not which day's
   // work-log to view — a completely different write, so branch off first.
   if (currentDetailPlanIsHeaderDate) {
-    if (!currentDetailPlanId) { workLogDateInput.value = currentDetailPlanDate || ''; return; } // plan row vanished (e.g. removed) since opening
+    if (!currentDetailPlanId) { setWorkLogDate(currentDetailPlanDate || ''); return; } // plan row vanished (e.g. removed) since opening
     const newPlanDate = workLogDateInput.value;
-    if (!newPlanDate) { workLogDateInput.value = currentDetailPlanDate; return; }
+    if (!newPlanDate) { setWorkLogDate(currentDetailPlanDate); return; }
     const oldPlanDate = currentDetailPlanDate;
     const { error } = await supabase.from('delovni_nalogi_planiranje').update({ plan_date: newPlanDate }).eq('id', currentDetailPlanId);
     if (error) {
-      workLogDateInput.value = oldPlanDate;
+      setWorkLogDate(oldPlanDate);
       showFormError('Napaka pri spreminjanju datuma planiranja: ' + error.message);
       return;
     }
@@ -1956,7 +1977,7 @@ workLogDateInput.addEventListener('change', async () => {
       p_new_date: newDate,
     });
     if (error) {
-      workLogDateInput.value = oldDate;
+      setWorkLogDate(oldDate);
       showFormError('Napaka pri spreminjanju datuma.');
       return;
     }
@@ -3309,6 +3330,7 @@ fabMenu.querySelectorAll('.fab-menu-item').forEach(btn => {
     if (btn.dataset.action === 'new-work-order')  openWorkOrderModal();
     if (btn.dataset.action === 'customer-list')   openDeclModal();
     if (btn.dataset.action === 'operators-list')  openOperatorsModal();
+    if (btn.dataset.action === 'reports')         openReportsModal();
   });
 });
 
@@ -3318,6 +3340,8 @@ cancelBtn.addEventListener('click', closeModal);
 formModal.addEventListener('click', e => { if (e.target === formModal) closeModal(); });
 declModal.addEventListener('click', e => { if (e.target === declModal) closeDeclModal(); });
 declModalClose.addEventListener('click', closeDeclModal);
+reportsModal.addEventListener('click', e => { if (e.target === reportsModal) closeReportsModal(); });
+reportsModalClose.addEventListener('click', closeReportsModal);
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -3327,8 +3351,80 @@ document.addEventListener('keydown', e => {
     if (!mapModal.hidden)       closeMapModal();
     if (!operatorsModal.hidden) closeOperatorsModal();
     if (!addCustomerModal.hidden) closeAddCustomerModal();
+    if (!reportsModal.hidden)   closeReportsModal();
   }
 });
+
+// ── Poročila (reports) modal ──────────────────────────────────
+async function openReportsModal() {
+  reportsError.hidden = true;
+  reportsListWrap.innerHTML = '<div class="state-loading"><div class="spinner"></div><p>Nalaganje...</p></div>';
+  showModalAnimated(reportsModal);
+  document.body.style.overflow = 'hidden';
+  await renderReportsList();
+}
+
+function closeReportsModal() {
+  hideModalAnimated(reportsModal);
+  document.body.style.overflow = '';
+}
+
+// get_work_orders_report() does the aggregation server-side (tracked
+// minutes, gap minutes between GERK-i within the same session, ha,
+// capture counts) — see migration_work_orders_report.sql. Only the
+// per-hour/per-ha rates are computed here, since they're trivial
+// divisions on data the RPC already returned.
+async function renderReportsList() {
+  const { data, error } = await supabase.rpc('get_work_orders_report');
+  if (error) {
+    reportsError.textContent = 'Napaka pri nalaganju poročila: ' + error.message;
+    reportsError.hidden = false;
+    reportsListWrap.innerHTML = '';
+    return;
+  }
+  if (!data?.length) {
+    reportsListWrap.innerHTML = '<div class="state-empty"><p>Ni delovnih nalogov.</p></div>';
+    return;
+  }
+  reportsListWrap.innerHTML = `
+    <div class="reports-table-wrap">
+      <table class="evidenca-table">
+        <thead>
+          <tr>
+            <th>Stranka</th>
+            <th>Nalog</th>
+            <th>Status</th>
+            <th>Ha</th>
+            <th>Zabeležen čas</th>
+            <th>Čas med GERK-i</th>
+            <th>Skupni čas</th>
+            <th>Zajete točke</th>
+            <th>Točk / h</th>
+            <th>Točk / ha</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(r => {
+            const hours = r.tracked_minutes / 60;
+            const perHour = hours > 0 ? (r.captures_count / hours).toFixed(2) : '—';
+            const perHa = r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—';
+            return `<tr>
+              <td>${escHtml(r.customer_name)}</td>
+              <td>${escHtml(r.stevilka || '—')}</td>
+              <td><span class="wo-status-badge wo-status--${slugStatus(r.status)}">${escHtml(r.status)}</span></td>
+              <td>${Number(r.total_ha).toFixed(2)}</td>
+              <td>${fmtHM(r.tracked_minutes)}</td>
+              <td>${fmtHM(r.gap_minutes)}</td>
+              <td>${fmtHM(r.total_minutes)}</td>
+              <td>${r.captures_count}</td>
+              <td>${perHour}</td>
+              <td>${perHa}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 
 // ── Operators (Izvajalci) modal ───────────────────────────────
 function showOperatorsError(msg) {

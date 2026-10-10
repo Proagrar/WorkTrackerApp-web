@@ -216,6 +216,7 @@
     <button type="button" class="fab-menu-item" data-action="new-work-order">+ Nov delovni nalog</button>
     <button type="button" class="fab-menu-item" data-action="customer-list">Seznam strank</button>
     <button type="button" class="fab-menu-item" data-action="operators-list">Izvajalci</button>
+    <button type="button" class="fab-menu-item" data-action="reports">Poročila</button>
   </div>
   <button id="addBtn" class="fab" aria-label="Meni">
     <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
@@ -248,7 +249,17 @@
             <input type="text" id="woAssignCustomerInput" class="field-input" placeholder="Išči stranko..." autocomplete="off">
             <ul id="woAssignCustomerSuggestions" class="gerk-suggestions" hidden></ul>
           </div>
-          <input class="field-input" type="date" id="workLogDate" />
+          <!-- Native <input type="date"> doesn't expose a way to control its
+               displayed format from the page (it follows the browser/OS
+               locale, not this page's lang="sl") — the real input stays
+               underneath for its value/picker, its own text hidden, and
+               #workLogDateDisplay overlays the Slovenian-formatted text.
+               Kept in sync by setWorkLogDate()/updateWorkLogDateDisplay()
+               in app.js. -->
+          <span class="date-sl-wrap field-input">
+            <input class="date-sl-input" type="date" id="workLogDate" />
+            <span class="date-sl-display" id="workLogDateDisplay" aria-hidden="true"></span>
+          </span>
           <!-- Admin only: assign/change izvajalec directly — same write
                reassignOperator() in planning.js does from a Planiranje
                card, just reachable from the main detail view too. Options
@@ -615,6 +626,29 @@
         </div>
         <div id="declTableWrap"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Poročila (admin only) ──────────────────────────────────
+       First report: one row per work order — stranka, številka, ha,
+       zabeležen čas, čas med GERK-i, skupni čas, zajete točke in
+       njihovo razmerje na uro/ha. Data from get_work_orders_report()
+       RPC — see renderReportsList() in app.js. -->
+  <div id="reportsModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="reportsModalTitle">
+    <div class="modal-sheet modal-sheet-wide">
+      <div class="modal-handle" aria-hidden="true"></div>
+      <div class="modal-head">
+        <h3 id="reportsModalTitle" class="modal-title">Poročila</h3>
+        <button id="reportsModalClose" class="btn btn-icon" aria-label="Zapri">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="17" y1="3" x2="3" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="field-hint">Čas med GERK-i: vsota premorov med zaključkom enega GERK-a in začetkom naslednjega, znotraj istega dne in izvajalca.</p>
+      <div id="reportsError" class="alert alert-error" hidden role="alert"></div>
+      <div id="reportsListWrap"></div>
     </div>
   </div>
 

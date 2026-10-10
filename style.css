@@ -718,6 +718,42 @@ input, select, textarea { font-family: inherit; }
   padding: 0 10px;
   font-size: .8125rem;
 }
+/* Slovenian-formatted date overlay — see the HTML comment above
+   #workLogDate in app.html for why this exists. .date-sl-wrap carries
+   .field-input too, so it inherits that class's box (border/background/
+   radius) plus the header override just above (36px band, 10px padding,
+   13px font) automatically — only the parts specific to the overlay
+   trick are added here. */
+.date-sl-wrap { position: relative; }
+/* :focus-within, not :focus — the focusable element is the nested real
+   input now, not this wrapper — same blue ring .field-input:focus gives
+   every other field. */
+.date-sl-wrap:focus-within {
+  border-color: var(--blue-800);
+  box-shadow: 0 0 0 3px rgba(28,69,146,.15);
+}
+.date-sl-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: transparent; /* hides the native (wrong-locale) text; the real value/picker still work */
+  outline: none;
+  cursor: pointer;
+}
+.date-sl-input::-webkit-calendar-picker-indicator { opacity: 1; }
+.date-sl-display {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  right: 20px; /* clears the native calendar icon */
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  pointer-events: none; /* clicks pass through to the real input underneath */
+}
+
 .wo-header-fields .wo-status-badge {
   flex: 1 1 110px;
   align-self: center;
@@ -1227,6 +1263,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .wo-section { padding-top: 16px; }
 
 #logsList { overflow-x: auto; }
+.reports-table-wrap { overflow-x: auto; }
 
 .evidenca-table {
   width: max-content;
