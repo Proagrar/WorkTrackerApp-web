@@ -209,6 +209,75 @@
       </section>
     </div>
 
+    <!-- ── Poročila (admin only) — full-screen view, not a tab-bar
+         entry (opened from the + menu, no persistent button). The tab
+         bar itself hides while this is shown; ← Nazaj returns to
+         whichever real tab was active before — see openReportsView()/
+         closeReportsView()/switchTab() in app.js. First report: one
+         row per work order — stranka, številka, ha, zabeležen čas, čas
+         med GERK-i, skupni čas, zajete točke in njihovo razmerje na
+         uro/ha. Data from get_work_orders_report() RPC. -->
+    <div id="panelReports" class="tab-panel" hidden>
+      <section class="logs-section wo-section">
+        <div class="section-header">
+          <div class="reports-head">
+            <button type="button" id="reportsBackBtn" class="btn btn-secondary btn-sm">← Nazaj</button>
+            <h2 class="section-title">Poročila</h2>
+          </div>
+        </div>
+        <p class="field-hint">Čas med GERK-i: vsota premorov med zaključkom enega GERK-a in začetkom naslednjega, znotraj istega dne in izvajalca.</p>
+
+        <div class="wo-toolbar">
+          <!-- Totals for the selected rows if any are checked, otherwise
+               for every currently filtered row — same "Izbrano"/"Skupaj"
+               pattern as the main list's ha chips. -->
+          <div id="reportsSummary" class="wo-ha-summary">
+            <span class="wo-ha-chip wo-ha-chip--total" id="reportsChipHa"></span>
+            <span class="wo-ha-chip wo-ha-chip--izvedeno" id="reportsChipTracked"></span>
+            <span class="wo-ha-chip wo-ha-chip--plan" id="reportsChipGap"></span>
+            <span class="wo-ha-chip wo-ha-chip--time" id="reportsChipTotal"></span>
+          </div>
+          <div class="reports-filter-group">
+            <div class="wo-status-filter-wrap">
+              <button type="button" id="reportsStatusFilterBtn" class="btn btn-secondary btn-sm wo-status-filter-btn">Vsi statusi</button>
+              <div id="reportsStatusFilterMenu" class="wo-status-filter-menu" hidden>
+                <div class="wo-gerk-checklist">
+                  <label class="wo-gerk-check-item">
+                    <input type="checkbox" class="reports-status-filter-cb" value="Plan">
+                    <span class="wo-gerk-check-code">Plan</span>
+                  </label>
+                  <label class="wo-gerk-check-item">
+                    <input type="checkbox" class="reports-status-filter-cb" value="V delu">
+                    <span class="wo-gerk-check-code">V delu</span>
+                  </label>
+                  <label class="wo-gerk-check-item">
+                    <input type="checkbox" class="reports-status-filter-cb" value="Izvedeno">
+                    <span class="wo-gerk-check-code">Izvedeno</span>
+                  </label>
+                  <label class="wo-gerk-check-item">
+                    <input type="checkbox" class="reports-status-filter-cb" value="Izdan Račun">
+                    <span class="wo-gerk-check-code">Izdan Račun</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <select id="reportsOperatorFilter" class="field-input field-select reports-operator-filter">
+              <option value="">Vsi izvajalci</option>
+            </select>
+            <label class="reports-date-field">Od <input type="date" id="reportsDateFrom"></label>
+            <label class="reports-date-field">Do <input type="date" id="reportsDateTo"></label>
+          </div>
+          <div class="wo-search-wrap">
+            <input type="text" id="reportsSearchStranka" class="wo-search-input" placeholder="Išči stranko..." autocomplete="off">
+            <button type="button" id="reportsSearchClearBtn" class="wo-search-clear" title="Počisti iskanje" aria-label="Počisti iskanje" hidden>✕</button>
+          </div>
+        </div>
+
+        <div id="reportsError" class="alert alert-error" hidden role="alert"></div>
+        <div id="reportsListWrap"></div>
+      </section>
+    </div>
+
   </main>
 
   <!-- ── FAB with menu ──────────────────────────────────────── -->
@@ -629,28 +698,6 @@
     </div>
   </div>
 
-  <!-- ── Poročila (admin only) ──────────────────────────────────
-       First report: one row per work order — stranka, številka, ha,
-       zabeležen čas, čas med GERK-i, skupni čas, zajete točke in
-       njihovo razmerje na uro/ha. Data from get_work_orders_report()
-       RPC — see renderReportsList() in app.js. -->
-  <div id="reportsModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="reportsModalTitle">
-    <div class="modal-sheet modal-sheet-wide">
-      <div class="modal-handle" aria-hidden="true"></div>
-      <div class="modal-head">
-        <h3 id="reportsModalTitle" class="modal-title">Poročila</h3>
-        <button id="reportsModalClose" class="btn btn-icon" aria-label="Zapri">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <line x1="17" y1="3" x2="3" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <p class="field-hint">Čas med GERK-i: vsota premorov med zaključkom enega GERK-a in začetkom naslednjega, znotraj istega dne in izvajalca.</p>
-      <div id="reportsError" class="alert alert-error" hidden role="alert"></div>
-      <div id="reportsListWrap"></div>
-    </div>
-  </div>
 
   <!-- ── Izvajalci (admin: who's eligible to be assigned as izvajalec) ── -->
   <div id="operatorsModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="operatorsModalTitle">

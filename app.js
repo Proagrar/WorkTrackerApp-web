@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.96';
+const APP_VERSION = 'v3.97';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -24,7 +24,11 @@ let logs         = [];
 let fields       = [];
 let currentMonth = new Date().toISOString().slice(0, 7);
 
-let currentTab       = 'nalogi'; // 'evidenca' | 'nalogi'
+let currentTab       = 'nalogi'; // 'evidenca' | 'nalogi' | 'planiranje' | 'reports'
+let preReportsTab    = 'nalogi'; // which real tab to return to from Poročila — see openReportsView()
+let reportsData         = []; // raw rows from get_work_orders_report(), refetched every time the view opens
+let reportsStatusValues = new Set();
+let selectedReportIds   = new Set();
 let workOrders       = [];
 let workOrdersLoaded = false;
 let workOrderCenterPoints = {}; // work_order_id -> {lat, lng}, from get_work_orders_center_points
@@ -117,6 +121,7 @@ const formSuccess = document.getElementById('formSuccess');
 const cancelBtn   = document.getElementById('cancelBtn');
 
 // ── Tabs ───────────────────────────────────────────────────────
+const tabBarEl        = document.querySelector('.tab-bar');
 const tabEvidenca     = document.getElementById('tabEvidenca');
 const tabNalogi       = document.getElementById('tabNalogi');
 const tabPlaniranje   = document.getElementById('tabPlaniranje');
@@ -194,11 +199,22 @@ const declTableWrap          = document.getElementById('declTableWrap');
 const declAddCustomerBtn     = document.getElementById('declAddCustomerBtn');
 let declCustomerId = null;
 
-// ── Poročila (reports) modal refs ───────────────────────────────
-const reportsModal      = document.getElementById('reportsModal');
-const reportsModalClose = document.getElementById('reportsModalClose');
-const reportsError      = document.getElementById('reportsError');
-const reportsListWrap   = document.getElementById('reportsListWrap');
+// ── Poročila (reports) full-screen view refs ────────────────────
+const panelReports            = document.getElementById('panelReports');
+const reportsBackBtn          = document.getElementById('reportsBackBtn');
+const reportsError            = document.getElementById('reportsError');
+const reportsListWrap         = document.getElementById('reportsListWrap');
+const reportsStatusFilterBtn  = document.getElementById('reportsStatusFilterBtn');
+const reportsStatusFilterMenu = document.getElementById('reportsStatusFilterMenu');
+const reportsOperatorFilter   = document.getElementById('reportsOperatorFilter');
+const reportsDateFrom         = document.getElementById('reportsDateFrom');
+const reportsDateTo           = document.getElementById('reportsDateTo');
+const reportsSearchStranka    = document.getElementById('reportsSearchStranka');
+const reportsSearchClearBtn   = document.getElementById('reportsSearchClearBtn');
+const reportsChipHa           = document.getElementById('reportsChipHa');
+const reportsChipTracked      = document.getElementById('reportsChipTracked');
+const reportsChipGap          = document.getElementById('reportsChipGap');
+const reportsChipTotal        = document.getElementById('reportsChipTotal');
 
 // ── Operators (Izvajalci) modal refs ────────────────────────────
 const operatorsModal      = document.getElementById('operatorsModal');
@@ -3330,7 +3346,7 @@ fabMenu.querySelectorAll('.fab-menu-item').forEach(btn => {
     if (btn.dataset.action === 'new-work-order')  openWorkOrderModal();
     if (btn.dataset.action === 'customer-list')   openDeclModal();
     if (btn.dataset.action === 'operators-list')  openOperatorsModal();
-    if (btn.dataset.action === 'reports')         openReportsModal();
+    if (btn.dataset.action === 'reports')         openReportsView();
   });
 });
 
@@ -3340,8 +3356,7 @@ cancelBtn.addEventListener('click', closeModal);
 formModal.addEventListener('click', e => { if (e.target === formModal) closeModal(); });
 declModal.addEventListener('click', e => { if (e.target === declModal) closeDeclModal(); });
 declModalClose.addEventListener('click', closeDeclModal);
-reportsModal.addEventListener('click', e => { if (e.target === reportsModal) closeReportsModal(); });
-reportsModalClose.addEventListener('click', closeReportsModal);
+reportsBackBtn.addEventListener('click', closeReportsView);
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -3351,30 +3366,20 @@ document.addEventListener('keydown', e => {
     if (!mapModal.hidden)       closeMapModal();
     if (!operatorsModal.hidden) closeOperatorsModal();
     if (!addCustomerModal.hidden) closeAddCustomerModal();
-    if (!reportsModal.hidden)   closeReportsModal();
+    if (currentTab === 'reports') closeReportsView();
   }
 });
 
-// ── Poročila (reports) modal ──────────────────────────────────
-async function openReportsModal() {
-  reportsError.hidden = true;
-  reportsListWrap.innerHTML = '<div class="state-loading"><div class="spinner"></div><p>Nalaganje...</p></div>';
-  showModalAnimated(reportsModal);
-  document.body.style.overflow = 'hidden';
-  await renderReportsList();
-}
-
-function closeReportsModal() {
-  hideModalAnimated(reportsModal);
-  document.body.style.overflow = '';
-}
-
+// ── Poročila (reports) full-screen view ─────────────────────────
 // get_work_orders_report() does the aggregation server-side (tracked
 // minutes, gap minutes between GERK-i within the same session, ha,
-// capture counts) — see migration_work_orders_report.sql. Only the
-// per-hour/per-ha rates are computed here, since they're trivial
-// divisions on data the RPC already returned.
-async function renderReportsList() {
+// capture counts) — see migration_work_orders_report*.sql. Everything
+// below (filters, selection, per-hour/per-ha rates) works off that one
+// fetch; filtering/selecting never re-queries.
+async function loadReportsData() {
+  reportsError.hidden = true;
+  reportsListWrap.innerHTML = '<div class="state-loading"><div class="spinner"></div><p>Nalaganje...</p></div>';
+  selectedReportIds = new Set();
   const { data, error } = await supabase.rpc('get_work_orders_report');
   if (error) {
     reportsError.textContent = 'Napaka pri nalaganju poročila: ' + error.message;
@@ -3382,18 +3387,97 @@ async function renderReportsList() {
     reportsListWrap.innerHTML = '';
     return;
   }
-  if (!data?.length) {
-    reportsListWrap.innerHTML = '<div class="state-empty"><p>Ni delovnih nalogov.</p></div>';
+  reportsData = data || [];
+  populateReportsOperatorFilter();
+  renderReportsTable();
+}
+
+// Only operators who actually appear in the data — not the full eligible
+// roster (loadOperatorsList()'s own list), since a filter full of options
+// that would always return zero rows isn't useful here.
+function populateReportsOperatorFilter() {
+  const names = new Map();
+  reportsData.forEach(r => { if (r.izvajalec_id) names.set(r.izvajalec_id, r.izvajalec_name); });
+  const sorted = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1], 'sl'));
+  const current = reportsOperatorFilter.value;
+  reportsOperatorFilter.innerHTML = '<option value="">Vsi izvajalci</option>' +
+    sorted.map(([id, name]) => `<option value="${escHtml(id)}">${escHtml(name)}</option>`).join('');
+  reportsOperatorFilter.value = sorted.some(([id]) => id === current) ? current : '';
+}
+
+function filteredReportsRows() {
+  const q = reportsSearchStranka.value.trim().toLowerCase();
+  const fromVal = reportsDateFrom.value; // 'YYYY-MM-DD' or ''
+  const toVal   = reportsDateTo.value;
+  return reportsData.filter(r => {
+    if (reportsStatusValues.size && !reportsStatusValues.has(r.status)) return false;
+    if (reportsOperatorFilter.value && r.izvajalec_id !== reportsOperatorFilter.value) return false;
+    if (q && !r.customer_name.toLowerCase().includes(q)) return false;
+    if (fromVal || toVal) {
+      const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
+      if (!d) return false;
+      if (fromVal && d < fromVal) return false;
+      if (toVal && d > toVal) return false;
+    }
+    return true;
+  });
+}
+
+function updateReportsStatusFilterButtonLabel() {
+  const n = reportsStatusValues.size;
+  reportsStatusFilterBtn.textContent = n === 0 ? 'Vsi statusi' : n === 1 ? [...reportsStatusValues][0] : `${n} statusi`;
+}
+
+// Selected rows' totals when one or more are checked, otherwise every
+// currently filtered row's totals — same pattern as the main list's ha
+// chips (updateWoHaSummary()). Rates are recomputed from the summed
+// totals, not averaged per-row (averaging rates would be wrong here).
+function updateReportsSummary(filteredRows) {
+  const source = selectedReportIds.size
+    ? reportsData.filter(r => selectedReportIds.has(r.work_order_id))
+    : filteredRows;
+  let ha = 0, tracked = 0, gap = 0, captures = 0;
+  for (const r of source) {
+    ha += Number(r.total_ha) || 0;
+    tracked += r.tracked_minutes || 0;
+    gap += r.gap_minutes || 0;
+    captures += r.captures_count || 0;
+  }
+  const label = selectedReportIds.size ? 'Izbrano' : 'Skupaj';
+  reportsChipHa.textContent = `${label}: ${ha.toFixed(2)} ha`;
+  reportsChipTracked.textContent = `Zabeležen: ${fmtHM(tracked)}`;
+  reportsChipGap.textContent = `Med GERK-i: ${fmtHM(gap)}`;
+  reportsChipTotal.textContent = `Skupaj čas: ${fmtHM(tracked + gap)}`;
+}
+
+function syncReportsSelectAllCheckbox(visibleIds) {
+  const headCb = reportsListWrap.querySelector('#reportsSelectAllCb');
+  if (!headCb) return;
+  const anySelected = visibleIds.some(id => selectedReportIds.has(id));
+  const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedReportIds.has(id));
+  headCb.checked = allSelected;
+  headCb.indeterminate = anySelected && !allSelected;
+}
+
+function renderReportsTable() {
+  const rows = filteredReportsRows();
+  updateReportsSummary(rows);
+
+  if (!rows.length) {
+    reportsListWrap.innerHTML = '<div class="state-empty"><p>Ni delovnih nalogov za izbrane filtre.</p></div>';
     return;
   }
+
   reportsListWrap.innerHTML = `
     <div class="reports-table-wrap">
       <table class="evidenca-table">
         <thead>
           <tr>
+            <th><input type="checkbox" id="reportsSelectAllCb" aria-label="Izberi vse"></th>
             <th>Stranka</th>
             <th>Nalog</th>
             <th>Status</th>
+            <th>Izvajalec</th>
             <th>Ha</th>
             <th>Zabeležen čas</th>
             <th>Čas med GERK-i</th>
@@ -3404,14 +3488,17 @@ async function renderReportsList() {
           </tr>
         </thead>
         <tbody>
-          ${data.map(r => {
+          ${rows.map(r => {
             const hours = r.tracked_minutes / 60;
             const perHour = hours > 0 ? (r.captures_count / hours).toFixed(2) : '—';
             const perHa = r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—';
+            const checked = selectedReportIds.has(r.work_order_id) ? 'checked' : '';
             return `<tr>
+              <td><input type="checkbox" class="reports-row-cb" data-id="${r.work_order_id}" ${checked}></td>
               <td>${escHtml(r.customer_name)}</td>
               <td>${escHtml(r.stevilka || '—')}</td>
               <td><span class="wo-status-badge wo-status--${slugStatus(r.status)}">${escHtml(r.status)}</span></td>
+              <td>${escHtml(r.izvajalec_name)}</td>
               <td>${Number(r.total_ha).toFixed(2)}</td>
               <td>${fmtHM(r.tracked_minutes)}</td>
               <td>${fmtHM(r.gap_minutes)}</td>
@@ -3424,7 +3511,55 @@ async function renderReportsList() {
         </tbody>
       </table>
     </div>`;
+
+  const visibleIds = rows.map(r => r.work_order_id);
+  syncReportsSelectAllCheckbox(visibleIds);
+
+  reportsListWrap.querySelector('#reportsSelectAllCb').addEventListener('click', () => {
+    const anySelected = visibleIds.some(id => selectedReportIds.has(id));
+    if (anySelected) visibleIds.forEach(id => selectedReportIds.delete(id));
+    else visibleIds.forEach(id => selectedReportIds.add(id));
+    renderReportsTable();
+  });
+  reportsListWrap.querySelectorAll('.reports-row-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedReportIds.add(cb.dataset.id);
+      else selectedReportIds.delete(cb.dataset.id);
+      updateReportsSummary(rows);
+      syncReportsSelectAllCheckbox(visibleIds);
+    });
+  });
 }
+
+reportsStatusFilterBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  reportsStatusFilterMenu.hidden = !reportsStatusFilterMenu.hidden;
+});
+reportsStatusFilterMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => { reportsStatusFilterMenu.hidden = true; });
+reportsStatusFilterMenu.querySelectorAll('.reports-status-filter-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) reportsStatusValues.add(cb.value);
+    else reportsStatusValues.delete(cb.value);
+    updateReportsStatusFilterButtonLabel();
+    renderReportsTable();
+  });
+});
+
+reportsOperatorFilter.addEventListener('change', renderReportsTable);
+reportsDateFrom.addEventListener('change', renderReportsTable);
+reportsDateTo.addEventListener('change', renderReportsTable);
+
+reportsSearchStranka.addEventListener('input', () => {
+  reportsSearchClearBtn.hidden = !reportsSearchStranka.value;
+  renderReportsTable();
+});
+reportsSearchClearBtn.addEventListener('click', () => {
+  reportsSearchStranka.value = '';
+  reportsSearchClearBtn.hidden = true;
+  renderReportsTable();
+  reportsSearchStranka.focus();
+});
 
 // ── Operators (Izvajalci) modal ───────────────────────────────
 function showOperatorsError(msg) {
@@ -3839,11 +3974,27 @@ function switchTab(tab) {
   tabEvidenca.classList.toggle('tab-btn--active', tab === 'evidenca');
   tabNalogi.classList.toggle('tab-btn--active', tab === 'nalogi');
   tabPlaniranje.classList.toggle('tab-btn--active', tab === 'planiranje');
+  // Poročila has no tab-bar button of its own (opened from the + menu) —
+  // hide the whole bar rather than leave it showing with nothing active.
+  tabBarEl.hidden         = tab === 'reports';
   panelEvidenca.hidden   = tab !== 'evidenca';
   panelNalogi.hidden     = tab !== 'nalogi';
   panelPlaniranje.hidden = tab !== 'planiranje';
+  panelReports.hidden    = tab !== 'reports';
   updateFabVisibility();
   if (tab === 'nalogi' && !workOrdersLoaded) loadWorkOrders();
+  if (tab === 'reports') loadReportsData();
+}
+
+// Poročila is reached from the + menu, not the tab bar, so it needs to
+// remember which real tab to return to on ← Nazaj instead of just always
+// going to one fixed tab.
+function openReportsView() {
+  preReportsTab = currentTab;
+  switchTab('reports');
+}
+function closeReportsView() {
+  switchTab(preReportsTab);
 }
 
 // Also re-applies the Planiranje tab's admin-only visibility — same

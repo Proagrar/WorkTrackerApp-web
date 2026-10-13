@@ -1258,6 +1258,49 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   letter-spacing: -.01em;
 }
 
+/* Poročila's own header row (back button + title) — .section-header
+   already handles the outer spacing, this just lines these two up. */
+.reports-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reports-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  flex-shrink: 0;
+}
+.reports-date-field input {
+  width: auto;
+  height: 34px;
+  padding: 0 8px;
+  font-size: .8125rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.reports-operator-filter {
+  width: auto;
+  height: 34px;
+  padding: 0 10px;
+  font-size: .8125rem;
+  flex-shrink: 0;
+}
+
+.reports-row-checkbox-col { width: 32px; }
+
 .logs-list { display: flex; flex-direction: column; gap: 10px; }
 
 .wo-section { padding-top: 16px; }
@@ -1319,6 +1362,15 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
    desktop flex row (display:contents), turned into a single
    non-wrapping row in the phone block below. */
 .wo-toolbar-buttons { display: contents; }
+
+/* Poročila's filter row (status + operator + date range) — same
+   display:contents-on-desktop trick as .wo-toolbar-buttons so these
+   items join .wo-toolbar's own flex-wrap and wrap naturally there, but
+   NOT the same mobile rule as .wo-toolbar-buttons: that one forces a
+   single non-wrapping row sized for 2-3 shrink/ellipsize buttons, which
+   a <select> and two date inputs can't do (they just overflow instead).
+   See the dedicated mobile rule for this class further down. */
+.reports-filter-group { display: contents; }
 
 /* Pushed flush left within the toolbar (auto margin eats the remaining
    space on its line), so the three chips sit right next to the filter
@@ -2026,6 +2078,21 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  /* Poročila's filter row: a <select> and two date inputs can't shrink
+     or ellipsize like the plain buttons .wo-toolbar-buttons was built
+     for, so this wraps instead of forcing one cramped non-wrapping row. */
+  .reports-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    margin: 0 0 8px;
+  }
+  .reports-filter-group > * { flex: 1 1 auto; min-width: 0; }
+  .reports-date-field { flex: 1 1 130px; }
+  .reports-date-field input { flex: 1; width: 0; } /* width:0 + flex:1 so the input actually stretches instead of keeping its intrinsic size */
+  .reports-operator-filter { flex: 1 1 140px; }
 
   /* Map overview: pinned to the bottom of the screen as soon as it's
      toggled on, instead of sitting below the list in normal flow —
