@@ -1480,8 +1480,6 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   gap: 8px;
   margin: 12px 0;
 }
-.reports-search-wrap { flex: 1 1 220px; min-width: 160px; }
-
 /* Pushed flush left within the toolbar (auto margin eats the remaining
    space on its line), so the three chips sit right next to the filter
    controls that change them, with the actual buttons staying
@@ -1568,6 +1566,23 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   transition: opacity var(--duration-fast) var(--ease-standard), visibility 0s linear 0s;
 }
 .wo-status-filter-menu .wo-gerk-checklist { max-height: none; border: none; margin-bottom: 0; }
+
+/* Customer filter — same dropdown component as the status filter, but
+   wider (customer names run longer than status words) and with its
+   checklist scrollable again (there can be far more than 4 customers),
+   plus a pinned "Izberi vse" row above the scrolling list. */
+.reports-customer-filter-menu { width: 260px; }
+.reports-customer-filter-menu .wo-gerk-checklist { max-height: 240px; overflow-y: auto; border: none; margin-bottom: 0; }
+.wo-gerk-check-item.reports-customer-select-all {
+  font-weight: 700;
+  border-bottom: 1.5px solid var(--border);
+  margin-bottom: 4px;
+}
+.reports-customer-filter-btn {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .wo-search-input {
   width: 140px;

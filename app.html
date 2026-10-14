@@ -269,9 +269,19 @@
           </select>
           <label class="reports-date-field">Od <input type="date" id="reportsDateFrom"></label>
           <label class="reports-date-field">Do <input type="date" id="reportsDateTo"></label>
-          <div class="wo-search-wrap reports-search-wrap">
-            <input type="text" id="reportsSearchStranka" class="wo-search-input" placeholder="Išči stranko..." autocomplete="off">
-            <button type="button" id="reportsSearchClearBtn" class="wo-search-clear" title="Počisti iskanje" aria-label="Počisti iskanje" hidden>✕</button>
+          <!-- Multi-select checklist dropdown (same component as the
+               status filter above), not free-text search — options are
+               rebuilt from distinct customers in the data, see
+               populateReportsCustomerFilter() in app.js. -->
+          <div class="wo-status-filter-wrap">
+            <button type="button" id="reportsCustomerFilterBtn" class="btn btn-secondary btn-sm wo-status-filter-btn reports-customer-filter-btn">Vse stranke</button>
+            <div id="reportsCustomerFilterMenu" class="wo-status-filter-menu reports-customer-filter-menu" hidden>
+              <label class="wo-gerk-check-item reports-customer-select-all">
+                <input type="checkbox" id="reportsCustomerSelectAllCb">
+                <span class="wo-gerk-check-code">Izberi vse</span>
+              </label>
+              <div class="wo-gerk-checklist" id="reportsCustomerFilterList"></div>
+            </div>
           </div>
         </div>
 

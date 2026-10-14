@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.101';
+const APP_VERSION = 'v3.102';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -28,6 +28,7 @@ let currentTab       = 'nalogi'; // 'evidenca' | 'nalogi' | 'planiranje' | 'repo
 let preReportsTab    = 'nalogi'; // which real tab to return to from Poročila — see openReportsView()
 let reportsData         = []; // raw rows from get_work_orders_report(), refetched every time the view opens
 let reportsStatusValues = new Set();
+let reportsCustomerValues = new Set();
 let selectedReportIds   = new Set();
 let reportsChartGrouping = 'week'; // 'day' | 'week' — toggle above the chart, see renderReportsChart()
 let reportsChartMetric   = 'time'; // 'time' | 'ha' — second toggle above the chart
@@ -211,8 +212,10 @@ const reportsStatusFilterMenu = document.getElementById('reportsStatusFilterMenu
 const reportsOperatorFilter   = document.getElementById('reportsOperatorFilter');
 const reportsDateFrom         = document.getElementById('reportsDateFrom');
 const reportsDateTo           = document.getElementById('reportsDateTo');
-const reportsSearchStranka    = document.getElementById('reportsSearchStranka');
-const reportsSearchClearBtn   = document.getElementById('reportsSearchClearBtn');
+const reportsCustomerFilterBtn   = document.getElementById('reportsCustomerFilterBtn');
+const reportsCustomerFilterMenu  = document.getElementById('reportsCustomerFilterMenu');
+const reportsCustomerFilterList  = document.getElementById('reportsCustomerFilterList');
+const reportsCustomerSelectAllCb = document.getElementById('reportsCustomerSelectAllCb');
 const reportsChartWrap        = document.getElementById('reportsChartWrap');
 const reportsChipHa           = document.getElementById('reportsChipHa');
 const reportsChipTracked      = document.getElementById('reportsChipTracked');
@@ -3407,6 +3410,7 @@ async function loadReportsData() {
   }
   reportsData = data || [];
   populateReportsOperatorFilter();
+  populateReportsCustomerFilter();
   renderReportsTable();
 }
 
@@ -3423,14 +3427,52 @@ function populateReportsOperatorFilter() {
   reportsOperatorFilter.value = sorted.some(([id]) => id === current) ? current : '';
 }
 
+// Multi-select checklist (same component as the status filter) — only
+// customers who actually appear in the data. Selections that no longer
+// exist after a reload are dropped rather than left dangling.
+function populateReportsCustomerFilter() {
+  const names = new Set();
+  reportsData.forEach(r => { if (r.customer_name) names.add(r.customer_name); });
+  const sorted = [...names].sort((a, b) => a.localeCompare(b, 'sl'));
+  [...reportsCustomerValues].forEach(v => { if (!sorted.includes(v)) reportsCustomerValues.delete(v); });
+
+  reportsCustomerFilterList.innerHTML = sorted.map(name => `
+    <label class="wo-gerk-check-item">
+      <input type="checkbox" class="reports-customer-filter-cb" value="${escHtml(name)}" ${reportsCustomerValues.has(name) ? 'checked' : ''}>
+      <span class="wo-gerk-check-code">${escHtml(name)}</span>
+    </label>`).join('');
+  reportsCustomerFilterList.querySelectorAll('.reports-customer-filter-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) reportsCustomerValues.add(cb.value);
+      else reportsCustomerValues.delete(cb.value);
+      syncReportsCustomerSelectAllCb(sorted);
+      updateReportsCustomerFilterButtonLabel();
+      renderReportsTable();
+    });
+  });
+  syncReportsCustomerSelectAllCb(sorted);
+  updateReportsCustomerFilterButtonLabel();
+}
+
+function syncReportsCustomerSelectAllCb(allNames) {
+  const selected = allNames.filter(n => reportsCustomerValues.has(n)).length;
+  reportsCustomerSelectAllCb.checked = allNames.length > 0 && selected === allNames.length;
+  reportsCustomerSelectAllCb.indeterminate = selected > 0 && selected < allNames.length;
+}
+
+function updateReportsCustomerFilterButtonLabel() {
+  const n = reportsCustomerValues.size;
+  reportsCustomerFilterBtn.textContent = n === 0 ? 'Vse stranke' : n === 1 ? [...reportsCustomerValues][0] : `${n} strank`;
+  reportsCustomerFilterBtn.title = n > 1 ? [...reportsCustomerValues].join(', ') : '';
+}
+
 function filteredReportsRows() {
-  const q = reportsSearchStranka.value.trim().toLowerCase();
   const fromVal = reportsDateFrom.value; // 'YYYY-MM-DD' or ''
   const toVal   = reportsDateTo.value;
   return reportsData.filter(r => {
     if (reportsStatusValues.size && !reportsStatusValues.has(r.status)) return false;
     if (reportsOperatorFilter.value && r.izvajalec_id !== reportsOperatorFilter.value) return false;
-    if (q && !r.customer_name.toLowerCase().includes(q)) return false;
+    if (reportsCustomerValues.size && !reportsCustomerValues.has(r.customer_name)) return false;
     if (fromVal || toVal) {
       const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
       if (!d) return false;
@@ -3762,6 +3804,7 @@ function renderReportsTable() {
 
 reportsStatusFilterBtn.addEventListener('click', e => {
   e.stopPropagation();
+  reportsCustomerFilterMenu.hidden = true;
   reportsStatusFilterMenu.hidden = !reportsStatusFilterMenu.hidden;
 });
 reportsStatusFilterMenu.addEventListener('click', e => e.stopPropagation());
@@ -3779,15 +3822,23 @@ reportsOperatorFilter.addEventListener('change', renderReportsTable);
 reportsDateFrom.addEventListener('change', renderReportsTable);
 reportsDateTo.addEventListener('change', renderReportsTable);
 
-reportsSearchStranka.addEventListener('input', () => {
-  reportsSearchClearBtn.hidden = !reportsSearchStranka.value;
-  renderReportsTable();
+reportsCustomerFilterBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  reportsStatusFilterMenu.hidden = true;
+  reportsCustomerFilterMenu.hidden = !reportsCustomerFilterMenu.hidden;
 });
-reportsSearchClearBtn.addEventListener('click', () => {
-  reportsSearchStranka.value = '';
-  reportsSearchClearBtn.hidden = true;
+reportsCustomerFilterMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => { reportsCustomerFilterMenu.hidden = true; });
+reportsCustomerSelectAllCb.addEventListener('change', () => {
+  const cbs = reportsCustomerFilterList.querySelectorAll('.reports-customer-filter-cb');
+  cbs.forEach(cb => {
+    cb.checked = reportsCustomerSelectAllCb.checked;
+    if (cb.checked) reportsCustomerValues.add(cb.value);
+    else reportsCustomerValues.delete(cb.value);
+  });
+  reportsCustomerSelectAllCb.indeterminate = false;
+  updateReportsCustomerFilterButtonLabel();
   renderReportsTable();
-  reportsSearchStranka.focus();
 });
 
 // ── Operators (Izvajalci) modal ───────────────────────────────
