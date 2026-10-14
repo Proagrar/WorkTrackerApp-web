@@ -1346,6 +1346,11 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   font-size: .75rem;
   color: var(--text-secondary);
 }
+.reports-chart-toggle-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .reports-chart-mode-toggle {
   display: inline-flex;
   border: 1.5px solid var(--border);
@@ -1353,7 +1358,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   overflow: hidden;
   flex-shrink: 0;
 }
-.reports-chart-mode-btn {
+.reports-chart-mode-btn, .reports-chart-metric-btn {
   padding: 4px 12px;
   font-size: .75rem;
   font-weight: 600;
@@ -1362,8 +1367,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   border: none;
   cursor: pointer;
 }
-.reports-chart-mode-btn + .reports-chart-mode-btn { border-left: 1.5px solid var(--border); }
-.reports-chart-mode-btn.is-active { background: var(--blue-800); color: #fff; }
+.reports-chart-mode-btn + .reports-chart-mode-btn,
+.reports-chart-metric-btn + .reports-chart-metric-btn { border-left: 1.5px solid var(--border); }
+.reports-chart-mode-btn.is-active, .reports-chart-metric-btn.is-active { background: var(--blue-800); color: #fff; }
 .reports-chart-legend-item {
   display: inline-flex;
   align-items: center;

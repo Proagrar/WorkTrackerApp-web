@@ -275,10 +275,11 @@
           </div>
         </div>
 
-        <!-- Stacked bar chart: total time per date, split into Zabeležen
-             (tracked) / Pot med GERK-i (gap) — reads filteredReportsRows(),
-             re-rendered by renderReportsTable() so it always matches the
-             table below. See renderReportsChart() in app.js. -->
+        <!-- Bar chart: per day/week (toggle, default weekly), measure
+             toggle Čas (stacked Zabeležen/Pot med GERK-i, default) or Ha —
+             reads filteredReportsRows(), re-rendered by renderReportsTable()
+             so it always matches the table below. See renderReportsChart()
+             in app.js. -->
         <div id="reportsChartWrap" class="reports-chart-wrap"></div>
 
         <div id="reportsError" class="alert alert-error" hidden role="alert"></div>

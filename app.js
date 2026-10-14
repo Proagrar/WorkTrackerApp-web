@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.100';
+const APP_VERSION = 'v3.101';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -30,6 +30,7 @@ let reportsData         = []; // raw rows from get_work_orders_report(), refetch
 let reportsStatusValues = new Set();
 let selectedReportIds   = new Set();
 let reportsChartGrouping = 'week'; // 'day' | 'week' — toggle above the chart, see renderReportsChart()
+let reportsChartMetric   = 'time'; // 'time' | 'ha' — second toggle above the chart
 let workOrders       = [];
 let workOrdersLoaded = false;
 let workOrderCenterPoints = {}; // work_order_id -> {lat, lng}, from get_work_orders_center_points
@@ -3486,6 +3487,11 @@ function syncReportsSelectAllCheckbox(visibleIds) {
 // instead rather than carrying extra mitigations for chip-color parity.
 const REPORTS_CHART_COLOR_TRACKED = '#2a78d6';
 const REPORTS_CHART_COLOR_GAP     = '#eb6834';
+// Third validated categorical slot (aqua) for the Ha measure — see
+// palette.md; it sits under the 3:1 contrast floor on the light surface,
+// so its relief is the Ha column already in the table below (never color
+// alone), same reasoning as the two time colors above.
+const REPORTS_CHART_COLOR_HA      = '#1baf7a';
 
 function reportsChartNiceMax(value) {
   if (value <= 0) return 60;
@@ -3493,8 +3499,19 @@ function reportsChartNiceMax(value) {
   return Math.ceil(value / step) * step;
 }
 
+function reportsChartNiceMaxHa(value) {
+  if (value <= 0) return 5;
+  const step = value > 100 ? 20 : value > 40 ? 10 : value > 10 ? 5 : 2;
+  return Math.ceil(value / step) * step;
+}
+
+function fmtHa(v) {
+  return `${Math.round(v * 100) / 100} ha`;
+}
+
 function renderReportsChart(rows) {
   const weekly = reportsChartGrouping === 'week';
+  const metric = reportsChartMetric; // 'time' | 'ha'
   const bucketKey = d => weekly ? isoWeekStartStr(d) : d;
 
   const byDate = new Map();
@@ -3502,9 +3519,10 @@ function renderReportsChart(rows) {
     const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
     if (!d) return;
     const key = bucketKey(d);
-    const bucket = byDate.get(key) || { tracked: 0, gap: 0 };
+    const bucket = byDate.get(key) || { tracked: 0, gap: 0, ha: 0 };
     bucket.tracked += r.tracked_minutes || 0;
     bucket.gap += r.gap_minutes || 0;
+    bucket.ha += r.total_ha || 0;
     byDate.set(key, bucket);
   });
   const dates = [...byDate.keys()].sort();
@@ -3512,18 +3530,25 @@ function renderReportsChart(rows) {
   const modeToolbar = `
     <div class="reports-chart-toolbar">
       <div class="reports-chart-legend">
+        ${metric === 'time' ? `
         <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
-        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>
+        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>` : ''}
       </div>
-      <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz grafa">
-        <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
-        <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+      <div class="reports-chart-toggle-group">
+        <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz po obdobju">
+          <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
+          <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+        </div>
+        <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz količine">
+          <button type="button" class="reports-chart-metric-btn${metric === 'time' ? ' is-active' : ''}" data-metric="time">Čas</button>
+          <button type="button" class="reports-chart-metric-btn${metric === 'ha' ? ' is-active' : ''}" data-metric="ha">Ha</button>
+        </div>
       </div>
     </div>`;
 
   if (!dates.length) {
     reportsChartWrap.innerHTML = modeToolbar + '<div class="reports-chart-empty">Ni podatkov za graf.</div>';
-    wireReportsChartModeToggle();
+    wireReportsChartToolbar();
     return;
   }
 
@@ -3544,8 +3569,9 @@ function renderReportsChart(rows) {
   // narrower than that.
   const labelStep = Math.max(1, Math.ceil((weekly ? 70 : 34) / bandW));
 
-  const maxTotal = Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap));
-  const niceMax = reportsChartNiceMax(maxTotal);
+  const niceMax = metric === 'time'
+    ? reportsChartNiceMax(Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap)))
+    : reportsChartNiceMaxHa(Math.max(...dates.map(d => byDate.get(d).ha)));
   const yScale = v => (v / niceMax) * plotH;
 
   const gridSteps = 4;
@@ -3553,32 +3579,40 @@ function renderReportsChart(rows) {
   for (let i = 0; i <= gridSteps; i++) {
     const v = (niceMax / gridSteps) * i;
     const y = baseline - yScale(v);
+    const label = metric === 'time' ? fmtHM(Math.round(v)) : fmtHa(v);
     gridlines += `<line class="reports-chart-gridline" x1="${leftPad}" y1="${y}" x2="${svgW - 8}" y2="${y}"></line>`;
-    gridlines += `<text class="reports-chart-axis-label" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(fmtHM(Math.round(v)))}</text>`;
+    gridlines += `<text class="reports-chart-axis-label" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(label)}</text>`;
   }
 
   let bars = '';
   dates.forEach((d, i) => {
-    const { tracked, gap: gapMin } = byDate.get(d);
+    const b = byDate.get(d);
     const x = leftPad + i * bandW + bandPad / 2;
-    const trackedH = yScale(tracked);
-    const gapH = yScale(gapMin);
-    const segGap = (trackedH > 0 && gapH > 0) ? segGapPx : 0;
-    const totalH = Math.max(trackedH + segGap + gapH, (tracked + gapMin) > 0 ? 1 : 0);
-    const topY = baseline - totalH;
-    const r = Math.min(4, totalH / 2);
+    let totalH, topY, r, clipShape, segs;
     const clipId = `reportsChartClip${i}`;
 
-    const clipShape = totalH <= 8
-      ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" rx="${r}"></rect>`
-      : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barW - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barW} z"></path>`;
-
-    let segs = '';
-    if (trackedH > 0) {
-      segs += `<rect x="${x}" y="${baseline - trackedH}" width="${barW}" height="${trackedH}" fill="${REPORTS_CHART_COLOR_TRACKED}"></rect>`;
-    }
-    if (gapH > 0) {
-      segs += `<rect x="${x}" y="${baseline - trackedH - segGap - gapH}" width="${barW}" height="${gapH}" fill="${REPORTS_CHART_COLOR_GAP}"></rect>`;
+    if (metric === 'time') {
+      const trackedH = yScale(b.tracked);
+      const gapH = yScale(b.gap);
+      const segGap = (trackedH > 0 && gapH > 0) ? segGapPx : 0;
+      totalH = Math.max(trackedH + segGap + gapH, (b.tracked + b.gap) > 0 ? 1 : 0);
+      topY = baseline - totalH;
+      r = Math.min(4, totalH / 2);
+      clipShape = totalH <= 8
+        ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" rx="${r}"></rect>`
+        : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barW - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barW} z"></path>`;
+      segs = '';
+      if (trackedH > 0) segs += `<rect x="${x}" y="${baseline - trackedH}" width="${barW}" height="${trackedH}" fill="${REPORTS_CHART_COLOR_TRACKED}"></rect>`;
+      if (gapH > 0) segs += `<rect x="${x}" y="${baseline - trackedH - segGap - gapH}" width="${barW}" height="${gapH}" fill="${REPORTS_CHART_COLOR_GAP}"></rect>`;
+    } else {
+      const haH = yScale(b.ha);
+      totalH = Math.max(haH, b.ha > 0 ? 1 : 0);
+      topY = baseline - totalH;
+      r = Math.min(4, totalH / 2);
+      clipShape = totalH <= 8
+        ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" rx="${r}"></rect>`
+        : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barW - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barW} z"></path>`;
+      segs = totalH > 0 ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" fill="${REPORTS_CHART_COLOR_HA}"></rect>` : '';
     }
 
     let label, tooltipLabel;
@@ -3592,7 +3626,9 @@ function renderReportsChart(rows) {
       label = fmtDayMonth(d);
       tooltipLabel = fmtSampleDate(d);
     }
-    const tooltipText = `${tooltipLabel} — Zabeležen: ${fmtHM(tracked)}, Pot med GERK-i: ${fmtHM(gapMin)}, skupaj: ${fmtHM(tracked + gapMin)}`;
+    const tooltipText = metric === 'time'
+      ? `${tooltipLabel} — Zabeležen: ${fmtHM(b.tracked)}, Pot med GERK-i: ${fmtHM(b.gap)}, skupaj: ${fmtHM(b.tracked + b.gap)}`
+      : `${tooltipLabel} — Ha: ${fmtHa(b.ha)}`;
     const showLabel = i % labelStep === 0;
 
     bars += `<g>
@@ -3607,7 +3643,7 @@ function renderReportsChart(rows) {
 
   reportsChartWrap.innerHTML = modeToolbar +
     `<svg class="reports-chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">${gridlines}${bars}</svg>`;
-  wireReportsChartModeToggle();
+  wireReportsChartToolbar();
 
   const tooltip = document.createElement('div');
   tooltip.className = 'reports-chart-tooltip';
@@ -3634,11 +3670,18 @@ function renderReportsChart(rows) {
   });
 }
 
-function wireReportsChartModeToggle() {
+function wireReportsChartToolbar() {
   reportsChartWrap.querySelectorAll('.reports-chart-mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (reportsChartGrouping === btn.dataset.mode) return;
       reportsChartGrouping = btn.dataset.mode;
+      renderReportsChart(filteredReportsRows());
+    });
+  });
+  reportsChartWrap.querySelectorAll('.reports-chart-metric-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (reportsChartMetric === btn.dataset.metric) return;
+      reportsChartMetric = btn.dataset.metric;
       renderReportsChart(filteredReportsRows());
     });
   });
