@@ -1300,6 +1300,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .reports-operator-filter {
   width: auto;
+  min-width: 170px;
   height: 34px;
   padding: 0 10px;
   font-size: .8125rem;
@@ -1330,13 +1331,39 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   text-align: center;
   padding: 24px 0;
 }
+.reports-chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
 .reports-chart-legend {
   display: flex;
   gap: 16px;
-  margin: 0 0 10px;
+  margin: 0;
   font-size: .75rem;
   color: var(--text-secondary);
 }
+.reports-chart-mode-toggle {
+  display: inline-flex;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.reports-chart-mode-btn {
+  padding: 4px 12px;
+  font-size: .75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: none;
+  cursor: pointer;
+}
+.reports-chart-mode-btn + .reports-chart-mode-btn { border-left: 1.5px solid var(--border); }
+.reports-chart-mode-btn.is-active { background: var(--blue-800); color: #fff; }
 .reports-chart-legend-item {
   display: inline-flex;
   align-items: center;
@@ -1403,6 +1430,12 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   white-space: nowrap;
 }
 .evidenca-table tr:first-child td { border-top: none; }
+
+/* Poročila's table has more columns than Evidenca dela's (12 incl.
+   checkbox) — tighter cell padding buys back width before the reader
+   needs to reach for the horizontal scrollbar .reports-table-wrap
+   already provides. */
+.reports-data-table th, .reports-data-table td { padding: 8px 10px; }
 
 .wo-toolbar {
   /* Now the only child of .section-header (the "Delovni Nalogi" title
@@ -2157,7 +2190,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .reports-filters-row > * { flex: 1 1 auto; min-width: 0; }
   .reports-date-field { flex: 1 1 130px; }
   .reports-date-field input { flex: 1; width: 0; } /* width:0 + flex:1 so the input actually stretches instead of keeping its intrinsic size */
-  .reports-operator-filter { flex: 1 1 140px; }
+  .reports-operator-filter { flex: 1 1 140px; min-width: 140px; }
 
   /* Map overview: pinned to the bottom of the screen as soon as it's
      toggled on, instead of sitting below the list in normal flow —

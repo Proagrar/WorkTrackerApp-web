@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.99';
+const APP_VERSION = 'v3.100';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -29,6 +29,7 @@ let preReportsTab    = 'nalogi'; // which real tab to return to from Poročila �
 let reportsData         = []; // raw rows from get_work_orders_report(), refetched every time the view opens
 let reportsStatusValues = new Set();
 let selectedReportIds   = new Set();
+let reportsChartGrouping = 'week'; // 'day' | 'week' — toggle above the chart, see renderReportsChart()
 let workOrders       = [];
 let workOrdersLoaded = false;
 let workOrderCenterPoints = {}; // work_order_id -> {lat, lng}, from get_work_orders_center_points
@@ -857,6 +858,21 @@ function fmtSampleDate(isoDate) {
   if (!isoDate) return '—';
   const [y, m, d] = isoDate.split('-');
   return `${parseInt(d, 10)}.${parseInt(m, 10)}.${y}`;
+}
+
+// Day.month only, no year — for chart axis labels where space is tight.
+function fmtDayMonth(isoDate) {
+  const [, m, d] = isoDate.split('-');
+  return `${parseInt(d, 10)}.${parseInt(m, 10)}.`;
+}
+
+// Monday (ISO week start) of the week containing isoDate, as YYYY-MM-DD —
+// used to bucket the Poročila chart into weekly bars.
+function isoWeekStartStr(isoDate) {
+  const d = new Date(isoDate + 'T00:00:00');
+  const dayIdx = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
+  d.setDate(d.getDate() - dayIdx);
+  return d.toISOString().slice(0, 10);
 }
 
 // workLogDateInput's value, mirrored into #workLogDateDisplay in the
@@ -3478,29 +3494,55 @@ function reportsChartNiceMax(value) {
 }
 
 function renderReportsChart(rows) {
+  const weekly = reportsChartGrouping === 'week';
+  const bucketKey = d => weekly ? isoWeekStartStr(d) : d;
+
   const byDate = new Map();
   rows.forEach(r => {
     const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
     if (!d) return;
-    const bucket = byDate.get(d) || { tracked: 0, gap: 0 };
+    const key = bucketKey(d);
+    const bucket = byDate.get(key) || { tracked: 0, gap: 0 };
     bucket.tracked += r.tracked_minutes || 0;
     bucket.gap += r.gap_minutes || 0;
-    byDate.set(d, bucket);
+    byDate.set(key, bucket);
   });
   const dates = [...byDate.keys()].sort();
 
+  const modeToolbar = `
+    <div class="reports-chart-toolbar">
+      <div class="reports-chart-legend">
+        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
+        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>
+      </div>
+      <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz grafa">
+        <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
+        <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+      </div>
+    </div>`;
+
   if (!dates.length) {
-    reportsChartWrap.innerHTML = '<div class="reports-chart-empty">Ni podatkov za graf.</div>';
+    reportsChartWrap.innerHTML = modeToolbar + '<div class="reports-chart-empty">Ni podatkov za graf.</div>';
+    wireReportsChartModeToggle();
     return;
   }
 
-  const barW = 24, segGapPx = 2, bandPad = 14;
+  // Weekly bars need a wider band than daily ones — their label ("11.9.–17.9.")
+  // is roughly twice as wide as a day label ("11.9."), so every bar can
+  // carry its own label without the thinning fallback below kicking in.
+  const barW = 24, segGapPx = 2, bandPad = weekly ? 46 : 14;
   const bandW = barW + bandPad;
   const plotH = 180, axisH = 34, topPad = 8;
   const leftPad = 44;
   const svgW = leftPad + dates.length * bandW + 8;
   const svgH = topPad + plotH + axisH;
   const baseline = topPad + plotH;
+
+  // Thin out x-axis text so labels never overlap regardless of how many
+  // bars there are — a day label ("11.9.") needs ~34px, a week-range one
+  // ("11.9.–17.9.") needs ~70px; skip every Nth one once bars are
+  // narrower than that.
+  const labelStep = Math.max(1, Math.ceil((weekly ? 70 : 34) / bandW));
 
   const maxTotal = Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap));
   const niceMax = reportsChartNiceMax(maxTotal);
@@ -3539,8 +3581,19 @@ function renderReportsChart(rows) {
       segs += `<rect x="${x}" y="${baseline - trackedH - segGap - gapH}" width="${barW}" height="${gapH}" fill="${REPORTS_CHART_COLOR_GAP}"></rect>`;
     }
 
-    const label = fmtSampleDate(d);
-    const tooltipText = `${label} — Zabeležen: ${fmtHM(tracked)}, Pot med GERK-i: ${fmtHM(gapMin)}, skupaj: ${fmtHM(tracked + gapMin)}`;
+    let label, tooltipLabel;
+    if (weekly) {
+      const weekEnd = new Date(d + 'T00:00:00');
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const weekEndStr = weekEnd.toISOString().slice(0, 10);
+      label = `${fmtDayMonth(d)}–${fmtDayMonth(weekEndStr)}`;
+      tooltipLabel = `Teden ${fmtSampleDate(d)}–${fmtSampleDate(weekEndStr)}`;
+    } else {
+      label = fmtDayMonth(d);
+      tooltipLabel = fmtSampleDate(d);
+    }
+    const tooltipText = `${tooltipLabel} — Zabeležen: ${fmtHM(tracked)}, Pot med GERK-i: ${fmtHM(gapMin)}, skupaj: ${fmtHM(tracked + gapMin)}`;
+    const showLabel = i % labelStep === 0;
 
     bars += `<g>
       <clipPath id="${clipId}">${clipShape}</clipPath>
@@ -3548,16 +3601,13 @@ function renderReportsChart(rows) {
       <rect class="reports-chart-bar-hit" data-tooltip="${escHtml(tooltipText)}"
             x="${x - bandPad / 2}" y="${topPad}" width="${bandW}" height="${plotH}"
             fill="transparent" tabindex="0" aria-label="${escHtml(tooltipText)}"><title>${escHtml(tooltipText)}</title></rect>
-      <text class="reports-chart-axis-label" x="${x + barW / 2}" y="${baseline + 16}" text-anchor="middle">${escHtml(label)}</text>
+      ${showLabel ? `<text class="reports-chart-axis-label" x="${x + barW / 2}" y="${baseline + 16}" text-anchor="middle">${escHtml(label)}</text>` : ''}
     </g>`;
   });
 
-  reportsChartWrap.innerHTML = `
-    <div class="reports-chart-legend">
-      <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
-      <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>
-    </div>
-    <svg class="reports-chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">${gridlines}${bars}</svg>`;
+  reportsChartWrap.innerHTML = modeToolbar +
+    `<svg class="reports-chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">${gridlines}${bars}</svg>`;
+  wireReportsChartModeToggle();
 
   const tooltip = document.createElement('div');
   tooltip.className = 'reports-chart-tooltip';
@@ -3584,6 +3634,16 @@ function renderReportsChart(rows) {
   });
 }
 
+function wireReportsChartModeToggle() {
+  reportsChartWrap.querySelectorAll('.reports-chart-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (reportsChartGrouping === btn.dataset.mode) return;
+      reportsChartGrouping = btn.dataset.mode;
+      renderReportsChart(filteredReportsRows());
+    });
+  });
+}
+
 function renderReportsTable() {
   const rows = filteredReportsRows();
   updateReportsSummary(rows);
@@ -3596,7 +3656,7 @@ function renderReportsTable() {
 
   reportsListWrap.innerHTML = `
     <div class="reports-table-wrap">
-      <table class="evidenca-table">
+      <table class="evidenca-table reports-data-table">
         <thead>
           <tr>
             <th><input type="checkbox" id="reportsSelectAllCb" aria-label="Izberi vse"></th>
@@ -3605,10 +3665,10 @@ function renderReportsTable() {
             <th>Status</th>
             <th>Izvajalec</th>
             <th>Ha</th>
-            <th>Zabeležen čas</th>
-            <th>Čas med GERK-i</th>
-            <th>Skupni čas</th>
-            <th>Zajete točke</th>
+            <th title="Zabeležen čas">Zabeležen</th>
+            <th title="Čas med GERK-i">Med GERK-i</th>
+            <th title="Skupni čas">Skupaj</th>
+            <th title="Zajete točke">Točke</th>
             <th>Točk / h</th>
             <th>Točk / ha</th>
           </tr>
