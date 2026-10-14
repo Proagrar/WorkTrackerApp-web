@@ -225,8 +225,6 @@
             <h2 class="section-title">Poročila</h2>
           </div>
         </div>
-        <p class="field-hint">Čas med GERK-i: vsota premorov med zaključkom enega GERK-a in začetkom naslednjega, znotraj istega dne in izvajalca.</p>
-
         <div class="wo-toolbar">
           <!-- Totals for the selected rows if any are checked, otherwise
                for every currently filtered row — same "Izbrano"/"Skupaj"
@@ -237,41 +235,51 @@
             <span class="wo-ha-chip wo-ha-chip--plan" id="reportsChipGap"></span>
             <span class="wo-ha-chip wo-ha-chip--time" id="reportsChipTotal"></span>
           </div>
-          <div class="reports-filter-group">
-            <div class="wo-status-filter-wrap">
-              <button type="button" id="reportsStatusFilterBtn" class="btn btn-secondary btn-sm wo-status-filter-btn">Vsi statusi</button>
-              <div id="reportsStatusFilterMenu" class="wo-status-filter-menu" hidden>
-                <div class="wo-gerk-checklist">
-                  <label class="wo-gerk-check-item">
-                    <input type="checkbox" class="reports-status-filter-cb" value="Plan">
-                    <span class="wo-gerk-check-code">Plan</span>
-                  </label>
-                  <label class="wo-gerk-check-item">
-                    <input type="checkbox" class="reports-status-filter-cb" value="V delu">
-                    <span class="wo-gerk-check-code">V delu</span>
-                  </label>
-                  <label class="wo-gerk-check-item">
-                    <input type="checkbox" class="reports-status-filter-cb" value="Izvedeno">
-                    <span class="wo-gerk-check-code">Izvedeno</span>
-                  </label>
-                  <label class="wo-gerk-check-item">
-                    <input type="checkbox" class="reports-status-filter-cb" value="Izdan Račun">
-                    <span class="wo-gerk-check-code">Izdan Račun</span>
-                  </label>
-                </div>
+        </div>
+
+        <!-- All filters in a single row, above the chart + table they
+             both scope — see dataviz skill's interaction.md ("one row,
+             above the charts, never per-chart"). -->
+        <div class="reports-filters-row">
+          <div class="wo-status-filter-wrap">
+            <button type="button" id="reportsStatusFilterBtn" class="btn btn-secondary btn-sm wo-status-filter-btn">Vsi statusi</button>
+            <div id="reportsStatusFilterMenu" class="wo-status-filter-menu" hidden>
+              <div class="wo-gerk-checklist">
+                <label class="wo-gerk-check-item">
+                  <input type="checkbox" class="reports-status-filter-cb" value="Plan">
+                  <span class="wo-gerk-check-code">Plan</span>
+                </label>
+                <label class="wo-gerk-check-item">
+                  <input type="checkbox" class="reports-status-filter-cb" value="V delu">
+                  <span class="wo-gerk-check-code">V delu</span>
+                </label>
+                <label class="wo-gerk-check-item">
+                  <input type="checkbox" class="reports-status-filter-cb" value="Izvedeno">
+                  <span class="wo-gerk-check-code">Izvedeno</span>
+                </label>
+                <label class="wo-gerk-check-item">
+                  <input type="checkbox" class="reports-status-filter-cb" value="Izdan Račun">
+                  <span class="wo-gerk-check-code">Izdan Račun</span>
+                </label>
               </div>
             </div>
-            <select id="reportsOperatorFilter" class="field-input field-select reports-operator-filter">
-              <option value="">Vsi izvajalci</option>
-            </select>
-            <label class="reports-date-field">Od <input type="date" id="reportsDateFrom"></label>
-            <label class="reports-date-field">Do <input type="date" id="reportsDateTo"></label>
           </div>
-          <div class="wo-search-wrap">
+          <select id="reportsOperatorFilter" class="field-input field-select reports-operator-filter">
+            <option value="">Vsi izvajalci</option>
+          </select>
+          <label class="reports-date-field">Od <input type="date" id="reportsDateFrom"></label>
+          <label class="reports-date-field">Do <input type="date" id="reportsDateTo"></label>
+          <div class="wo-search-wrap reports-search-wrap">
             <input type="text" id="reportsSearchStranka" class="wo-search-input" placeholder="Išči stranko..." autocomplete="off">
             <button type="button" id="reportsSearchClearBtn" class="wo-search-clear" title="Počisti iskanje" aria-label="Počisti iskanje" hidden>✕</button>
           </div>
         </div>
+
+        <!-- Stacked bar chart: total time per date, split into Zabeležen
+             (tracked) / Pot med GERK-i (gap) — reads filteredReportsRows(),
+             re-rendered by renderReportsTable() so it always matches the
+             table below. See renderReportsChart() in app.js. -->
+        <div id="reportsChartWrap" class="reports-chart-wrap"></div>
 
         <div id="reportsError" class="alert alert-error" hidden role="alert"></div>
         <div id="reportsListWrap"></div>

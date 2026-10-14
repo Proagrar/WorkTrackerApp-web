@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.98';
+const APP_VERSION = 'v3.99';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -211,6 +211,7 @@ const reportsDateFrom         = document.getElementById('reportsDateFrom');
 const reportsDateTo           = document.getElementById('reportsDateTo');
 const reportsSearchStranka    = document.getElementById('reportsSearchStranka');
 const reportsSearchClearBtn   = document.getElementById('reportsSearchClearBtn');
+const reportsChartWrap        = document.getElementById('reportsChartWrap');
 const reportsChipHa           = document.getElementById('reportsChipHa');
 const reportsChipTracked      = document.getElementById('reportsChipTracked');
 const reportsChipGap          = document.getElementById('reportsChipGap');
@@ -3459,9 +3460,134 @@ function syncReportsSelectAllCheckbox(visibleIds) {
   headCb.indeterminate = anySelected && !allSelected;
 }
 
+// Stacked bar chart above the table — total time per date (r.ustvarjen's
+// date part), split Zabeležen (tracked) / Pot med GERK-i (gap), so the
+// picture always matches whatever filteredReportsRows() currently
+// returns. Vanilla SVG, no charting library. Colors are the dataviz
+// skill's validated categorical slots 1 (blue) & 2 (orange) — the app's
+// own chip green/amber sits in the CVD floor band at this surface
+// (validate_palette.js), so the chart uses the cleanly-passing pair
+// instead rather than carrying extra mitigations for chip-color parity.
+const REPORTS_CHART_COLOR_TRACKED = '#2a78d6';
+const REPORTS_CHART_COLOR_GAP     = '#eb6834';
+
+function reportsChartNiceMax(value) {
+  if (value <= 0) return 60;
+  const step = value > 600 ? 120 : value > 120 ? 60 : 30;
+  return Math.ceil(value / step) * step;
+}
+
+function renderReportsChart(rows) {
+  const byDate = new Map();
+  rows.forEach(r => {
+    const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
+    if (!d) return;
+    const bucket = byDate.get(d) || { tracked: 0, gap: 0 };
+    bucket.tracked += r.tracked_minutes || 0;
+    bucket.gap += r.gap_minutes || 0;
+    byDate.set(d, bucket);
+  });
+  const dates = [...byDate.keys()].sort();
+
+  if (!dates.length) {
+    reportsChartWrap.innerHTML = '<div class="reports-chart-empty">Ni podatkov za graf.</div>';
+    return;
+  }
+
+  const barW = 24, segGapPx = 2, bandPad = 14;
+  const bandW = barW + bandPad;
+  const plotH = 180, axisH = 34, topPad = 8;
+  const leftPad = 44;
+  const svgW = leftPad + dates.length * bandW + 8;
+  const svgH = topPad + plotH + axisH;
+  const baseline = topPad + plotH;
+
+  const maxTotal = Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap));
+  const niceMax = reportsChartNiceMax(maxTotal);
+  const yScale = v => (v / niceMax) * plotH;
+
+  const gridSteps = 4;
+  let gridlines = '';
+  for (let i = 0; i <= gridSteps; i++) {
+    const v = (niceMax / gridSteps) * i;
+    const y = baseline - yScale(v);
+    gridlines += `<line class="reports-chart-gridline" x1="${leftPad}" y1="${y}" x2="${svgW - 8}" y2="${y}"></line>`;
+    gridlines += `<text class="reports-chart-axis-label" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(fmtHM(Math.round(v)))}</text>`;
+  }
+
+  let bars = '';
+  dates.forEach((d, i) => {
+    const { tracked, gap: gapMin } = byDate.get(d);
+    const x = leftPad + i * bandW + bandPad / 2;
+    const trackedH = yScale(tracked);
+    const gapH = yScale(gapMin);
+    const segGap = (trackedH > 0 && gapH > 0) ? segGapPx : 0;
+    const totalH = Math.max(trackedH + segGap + gapH, (tracked + gapMin) > 0 ? 1 : 0);
+    const topY = baseline - totalH;
+    const r = Math.min(4, totalH / 2);
+    const clipId = `reportsChartClip${i}`;
+
+    const clipShape = totalH <= 8
+      ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" rx="${r}"></rect>`
+      : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barW - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barW} z"></path>`;
+
+    let segs = '';
+    if (trackedH > 0) {
+      segs += `<rect x="${x}" y="${baseline - trackedH}" width="${barW}" height="${trackedH}" fill="${REPORTS_CHART_COLOR_TRACKED}"></rect>`;
+    }
+    if (gapH > 0) {
+      segs += `<rect x="${x}" y="${baseline - trackedH - segGap - gapH}" width="${barW}" height="${gapH}" fill="${REPORTS_CHART_COLOR_GAP}"></rect>`;
+    }
+
+    const label = fmtSampleDate(d);
+    const tooltipText = `${label} — Zabeležen: ${fmtHM(tracked)}, Pot med GERK-i: ${fmtHM(gapMin)}, skupaj: ${fmtHM(tracked + gapMin)}`;
+
+    bars += `<g>
+      <clipPath id="${clipId}">${clipShape}</clipPath>
+      <g clip-path="url(#${clipId})">${segs}</g>
+      <rect class="reports-chart-bar-hit" data-tooltip="${escHtml(tooltipText)}"
+            x="${x - bandPad / 2}" y="${topPad}" width="${bandW}" height="${plotH}"
+            fill="transparent" tabindex="0" aria-label="${escHtml(tooltipText)}"><title>${escHtml(tooltipText)}</title></rect>
+      <text class="reports-chart-axis-label" x="${x + barW / 2}" y="${baseline + 16}" text-anchor="middle">${escHtml(label)}</text>
+    </g>`;
+  });
+
+  reportsChartWrap.innerHTML = `
+    <div class="reports-chart-legend">
+      <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
+      <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>
+    </div>
+    <svg class="reports-chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">${gridlines}${bars}</svg>`;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'reports-chart-tooltip';
+  tooltip.hidden = true;
+  reportsChartWrap.appendChild(tooltip);
+
+  const showTooltip = (el, clientX, clientY) => {
+    tooltip.textContent = el.dataset.tooltip;
+    tooltip.hidden = false;
+    tooltip.style.left = (clientX + 12) + 'px';
+    tooltip.style.top = (clientY + 12) + 'px';
+  };
+  const hideTooltip = () => { tooltip.hidden = true; };
+
+  reportsChartWrap.querySelectorAll('.reports-chart-bar-hit').forEach(el => {
+    el.addEventListener('pointerenter', e => showTooltip(el, e.clientX, e.clientY));
+    el.addEventListener('pointermove', e => showTooltip(el, e.clientX, e.clientY));
+    el.addEventListener('pointerleave', hideTooltip);
+    el.addEventListener('focus', () => {
+      const r = el.getBoundingClientRect();
+      showTooltip(el, r.left, r.top);
+    });
+    el.addEventListener('blur', hideTooltip);
+  });
+}
+
 function renderReportsTable() {
   const rows = filteredReportsRows();
   updateReportsSummary(rows);
+  renderReportsChart(rows);
 
   if (!rows.length) {
     reportsListWrap.innerHTML = '<div class="state-empty"><p>Ni delovnih nalogov za izbrane filtre.</p></div>';

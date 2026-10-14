@@ -1308,6 +1308,65 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .reports-row-checkbox-col { width: 32px; }
 
+/* Poročila stacked bar chart — total time per date, split Zabeležen /
+   Pot med GERK-i. Colors are the dataviz skill's validated categorical
+   slots 1 (blue) & 2 (orange): both checks pass cleanly at this surface,
+   unlike the app's own green/amber chip colors which sit in the CVD
+   floor band (validate_palette.js) — kept separate from .wo-ha-chip on
+   purpose, a chart series needs the clean pair more than chip-color
+   consistency does. */
+.reports-chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  margin: 0 0 16px;
+  overflow-x: auto;
+}
+.reports-chart-empty {
+  color: var(--text-secondary);
+  font-size: .8125rem;
+  text-align: center;
+  padding: 24px 0;
+}
+.reports-chart-legend {
+  display: flex;
+  gap: 16px;
+  margin: 0 0 10px;
+  font-size: .75rem;
+  color: var(--text-secondary);
+}
+.reports-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.reports-chart-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.reports-chart-svg { display: block; }
+.reports-chart-bar-hit { cursor: pointer; }
+.reports-chart-axis-label { fill: var(--text-secondary); font-size: 10px; font-family: inherit; }
+.reports-chart-gridline { stroke: var(--border-light); stroke-width: 1; }
+.reports-chart-tooltip {
+  position: fixed;
+  z-index: 50;
+  background: var(--text-primary);
+  color: #fff;
+  font-size: .75rem;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.reports-chart-tooltip strong { font-weight: 700; }
+
 .logs-list { display: flex; flex-direction: column; gap: 10px; }
 
 .wo-section { padding-top: 16px; }
@@ -1370,14 +1429,19 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
    non-wrapping row in the phone block below. */
 .wo-toolbar-buttons { display: contents; }
 
-/* Poročila's filter row (status + operator + date range) — same
-   display:contents-on-desktop trick as .wo-toolbar-buttons so these
-   items join .wo-toolbar's own flex-wrap and wrap naturally there, but
-   NOT the same mobile rule as .wo-toolbar-buttons: that one forces a
-   single non-wrapping row sized for 2-3 shrink/ellipsize buttons, which
-   a <select> and two date inputs can't do (they just overflow instead).
-   See the dedicated mobile rule for this class further down. */
-.reports-filter-group { display: contents; }
+/* Poročila's filter row — status + operator + date range + search, all
+   as direct children of one real flex row (not the display:contents
+   trick .wo-toolbar-buttons uses — this row lives on its own line below
+   the summary chips, not merged into .wo-toolbar). Wraps on narrow
+   screens; see the mobile override further down. */
+.reports-filters-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.reports-search-wrap { flex: 1 1 220px; min-width: 160px; }
 
 /* Pushed flush left within the toolbar (auto margin eats the remaining
    space on its line), so the three chips sit right next to the filter
@@ -2088,15 +2152,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
   /* Poročila's filter row: a <select> and two date inputs can't shrink
      or ellipsize like the plain buttons .wo-toolbar-buttons was built
-     for, so this wraps instead of forcing one cramped non-wrapping row. */
-  .reports-filter-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: 100%;
-    margin: 0 0 8px;
-  }
-  .reports-filter-group > * { flex: 1 1 auto; min-width: 0; }
+     for, so this wraps (base .reports-filters-row rule already sets
+     flex-wrap: wrap) instead of forcing one cramped non-wrapping row. */
+  .reports-filters-row > * { flex: 1 1 auto; min-width: 0; }
   .reports-date-field { flex: 1 1 130px; }
   .reports-date-field input { flex: 1; width: 0; } /* width:0 + flex:1 so the input actually stretches instead of keeping its intrinsic size */
   .reports-operator-filter { flex: 1 1 140px; }
