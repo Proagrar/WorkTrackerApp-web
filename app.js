@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.102';
+const APP_VERSION = 'v3.103';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -877,6 +877,23 @@ function isoWeekStartStr(isoDate) {
   const dayIdx = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
   d.setDate(d.getDate() - dayIdx);
   return d.toISOString().slice(0, 10);
+}
+
+// First of the month containing isoDate, as YYYY-MM-01 — used to bucket
+// the Poročila chart into monthly bars. String-sortable like the day/week keys.
+function monthStartStr(isoDate) {
+  return isoDate.slice(0, 7) + '-01';
+}
+
+const SLO_MONTHS_SHORT = ['jan.', 'feb.', 'mar.', 'apr.', 'maj', 'jun.', 'jul.', 'avg.', 'sep.', 'okt.', 'nov.', 'dec.'];
+const SLO_MONTHS_FULL = ['januar', 'februar', 'marec', 'april', 'maj', 'junij', 'julij', 'avgust', 'september', 'oktober', 'november', 'december'];
+function fmtMonthShort(isoDate) {
+  const [y, m] = isoDate.split('-');
+  return `${SLO_MONTHS_SHORT[parseInt(m, 10) - 1]} ${y}`;
+}
+function fmtMonthFull(isoDate) {
+  const [y, m] = isoDate.split('-');
+  return `${SLO_MONTHS_FULL[parseInt(m, 10) - 1]} ${y}`;
 }
 
 // workLogDateInput's value, mirrored into #workLogDateDisplay in the
@@ -3553,8 +3570,9 @@ function fmtHa(v) {
 
 function renderReportsChart(rows) {
   const weekly = reportsChartGrouping === 'week';
+  const monthly = reportsChartGrouping === 'month';
   const metric = reportsChartMetric; // 'time' | 'ha'
-  const bucketKey = d => weekly ? isoWeekStartStr(d) : d;
+  const bucketKey = d => weekly ? isoWeekStartStr(d) : monthly ? monthStartStr(d) : d;
 
   const byDate = new Map();
   rows.forEach(r => {
@@ -3578,8 +3596,9 @@ function renderReportsChart(rows) {
       </div>
       <div class="reports-chart-toggle-group">
         <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz po obdobju">
+          <button type="button" class="reports-chart-mode-btn${monthly ? ' is-active' : ''}" data-mode="month">Mesečno</button>
           <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
-          <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+          <button type="button" class="reports-chart-mode-btn${!weekly && !monthly ? ' is-active' : ''}" data-mode="day">Dnevno</button>
         </div>
         <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz količine">
           <button type="button" class="reports-chart-metric-btn${metric === 'time' ? ' is-active' : ''}" data-metric="time">Čas</button>
@@ -3594,10 +3613,11 @@ function renderReportsChart(rows) {
     return;
   }
 
-  // Weekly bars need a wider band than daily ones — their label ("11.9.–17.9.")
-  // is roughly twice as wide as a day label ("11.9."), so every bar can
-  // carry its own label without the thinning fallback below kicking in.
-  const barW = 24, segGapPx = 2, bandPad = weekly ? 46 : 14;
+  // Weekly/monthly bars need a wider band than daily ones — their labels
+  // ("11.9.–17.9.", "sep. 2026") run longer than a day label ("11.9."),
+  // so every bar can carry its own label without the thinning fallback
+  // below kicking in.
+  const barW = 24, segGapPx = 2, bandPad = weekly ? 46 : monthly ? 38 : 14;
   const bandW = barW + bandPad;
   const plotH = 180, axisH = 34, topPad = 8;
   const leftPad = 44;
@@ -3606,10 +3626,11 @@ function renderReportsChart(rows) {
   const baseline = topPad + plotH;
 
   // Thin out x-axis text so labels never overlap regardless of how many
-  // bars there are — a day label ("11.9.") needs ~34px, a week-range one
-  // ("11.9.–17.9.") needs ~70px; skip every Nth one once bars are
-  // narrower than that.
-  const labelStep = Math.max(1, Math.ceil((weekly ? 70 : 34) / bandW));
+  // bars there are — a day label ("11.9.") needs ~34px, a month one
+  // ("sep. 2026") ~60px, a week-range one ("11.9.–17.9.") ~70px; skip
+  // every Nth one once bars are narrower than that.
+  const labelNeed = weekly ? 70 : monthly ? 60 : 34;
+  const labelStep = Math.max(1, Math.ceil(labelNeed / bandW));
 
   const niceMax = metric === 'time'
     ? reportsChartNiceMax(Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap)))
@@ -3664,6 +3685,9 @@ function renderReportsChart(rows) {
       const weekEndStr = weekEnd.toISOString().slice(0, 10);
       label = `${fmtDayMonth(d)}–${fmtDayMonth(weekEndStr)}`;
       tooltipLabel = `Teden ${fmtSampleDate(d)}–${fmtSampleDate(weekEndStr)}`;
+    } else if (monthly) {
+      label = fmtMonthShort(d);
+      tooltipLabel = fmtMonthFull(d);
     } else {
       label = fmtDayMonth(d);
       tooltipLabel = fmtSampleDate(d);
