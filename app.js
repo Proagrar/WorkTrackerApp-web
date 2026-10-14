@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.100';
+const APP_VERSION = 'v3.101';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -30,6 +30,7 @@ let reportsData         = []; // raw rows from get_work_orders_report(), refetch
 let reportsStatusValues = new Set();
 let selectedReportIds   = new Set();
 let reportsChartGrouping = 'week'; // 'day' | 'week' — toggle above the chart, see renderReportsChart()
+let reportsChartMetric   = 'time'; // 'time' | 'ha' | 'both' — second toggle above the chart
 let workOrders       = [];
 let workOrdersLoaded = false;
 let workOrderCenterPoints = {}; // work_order_id -> {lat, lng}, from get_work_orders_center_points
@@ -210,8 +211,7 @@ const reportsStatusFilterMenu = document.getElementById('reportsStatusFilterMenu
 const reportsOperatorFilter   = document.getElementById('reportsOperatorFilter');
 const reportsDateFrom         = document.getElementById('reportsDateFrom');
 const reportsDateTo           = document.getElementById('reportsDateTo');
-const reportsSearchStranka    = document.getElementById('reportsSearchStranka');
-const reportsSearchClearBtn   = document.getElementById('reportsSearchClearBtn');
+const reportsCustomerFilter   = document.getElementById('reportsCustomerFilter');
 const reportsChartWrap        = document.getElementById('reportsChartWrap');
 const reportsChipHa           = document.getElementById('reportsChipHa');
 const reportsChipTracked      = document.getElementById('reportsChipTracked');
@@ -872,6 +872,15 @@ function isoWeekStartStr(isoDate) {
   const d = new Date(isoDate + 'T00:00:00');
   const dayIdx = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
   d.setDate(d.getDate() - dayIdx);
+  return d.toISOString().slice(0, 10);
+}
+
+// isoDate shifted by N days (N can be negative), as YYYY-MM-DD — used to
+// walk a continuous day/week range for the Poročila chart so empty
+// buckets show up too, not just the ones with data.
+function addDaysStr(isoDate, days) {
+  const d = new Date(isoDate + 'T00:00:00');
+  d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -3406,6 +3415,7 @@ async function loadReportsData() {
   }
   reportsData = data || [];
   populateReportsOperatorFilter();
+  populateReportsCustomerFilter();
   renderReportsTable();
 }
 
@@ -3422,14 +3432,38 @@ function populateReportsOperatorFilter() {
   reportsOperatorFilter.value = sorted.some(([id]) => id === current) ? current : '';
 }
 
+// Dropdown instead of free-text search — only customers with a row inside
+// the current Od/Do range (unlike the operator filter, deliberately date-aware
+// per Matej's ask), so the list never offers a customer that would just
+// return zero rows for the active date window. Re-run whenever the date
+// filters change, not just on initial load.
+function populateReportsCustomerFilter() {
+  const fromVal = reportsDateFrom.value;
+  const toVal = reportsDateTo.value;
+  const names = new Set();
+  reportsData.forEach(r => {
+    if (fromVal || toVal) {
+      const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
+      if (!d) return;
+      if (fromVal && d < fromVal) return;
+      if (toVal && d > toVal) return;
+    }
+    if (r.customer_name) names.add(r.customer_name);
+  });
+  const sorted = [...names].sort((a, b) => a.localeCompare(b, 'sl'));
+  const current = reportsCustomerFilter.value;
+  reportsCustomerFilter.innerHTML = '<option value="">Vse stranke</option>' +
+    sorted.map(name => `<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');
+  reportsCustomerFilter.value = sorted.includes(current) ? current : '';
+}
+
 function filteredReportsRows() {
-  const q = reportsSearchStranka.value.trim().toLowerCase();
   const fromVal = reportsDateFrom.value; // 'YYYY-MM-DD' or ''
   const toVal   = reportsDateTo.value;
   return reportsData.filter(r => {
     if (reportsStatusValues.size && !reportsStatusValues.has(r.status)) return false;
     if (reportsOperatorFilter.value && r.izvajalec_id !== reportsOperatorFilter.value) return false;
-    if (q && !r.customer_name.toLowerCase().includes(q)) return false;
+    if (reportsCustomerFilter.value && r.customer_name !== reportsCustomerFilter.value) return false;
     if (fromVal || toVal) {
       const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
       if (!d) return false;
@@ -3484,8 +3518,16 @@ function syncReportsSelectAllCheckbox(visibleIds) {
 // own chip green/amber sits in the CVD floor band at this surface
 // (validate_palette.js), so the chart uses the cleanly-passing pair
 // instead rather than carrying extra mitigations for chip-color parity.
+// Third series (Ha) uses validated categorical slot 3 (aqua) — the first
+// three slots are the ones that still clear every CVD/contrast check
+// all-pairs (palette.md), which matters here since "Oboje" shows all three
+// at once. Aqua sits under the 3:1 contrast floor on the light surface, so
+// its relief (per the skill's contrast-WARN rule) is the direct ha value
+// label on each bar in "Oboje" mode, plus the Ha column already in the
+// table below — never color alone.
 const REPORTS_CHART_COLOR_TRACKED = '#2a78d6';
 const REPORTS_CHART_COLOR_GAP     = '#eb6834';
+const REPORTS_CHART_COLOR_HA      = '#1baf7a';
 
 function reportsChartNiceMax(value) {
   if (value <= 0) return 60;
@@ -3493,121 +3535,224 @@ function reportsChartNiceMax(value) {
   return Math.ceil(value / step) * step;
 }
 
+function reportsChartNiceMaxHa(value) {
+  if (value <= 0) return 5;
+  const step = value > 100 ? 20 : value > 40 ? 10 : value > 10 ? 5 : 2;
+  return Math.ceil(value / step) * step;
+}
+
+function fmtHa(v) {
+  const r = Math.round(v * 100) / 100;
+  return `${r} ha`;
+}
+
+// Builds one rounded-top bar (single color or stacked) inside a band.
+// heights/colors are bottom-to-top; zero-height entries are skipped. Mirrors
+// the dataviz skill's bar spec: <=24px thick (caller picks barWidth), 4px
+// rounded data-end, square baseline, 2px surface gap between stacked
+// segments — and keeps a visible 1px sliver instead of disappearing when a
+// value is tiny relative to the axis scale.
+function reportsChartRoundedBar(x, barWidth, baseline, heights, colors, segGapPx, clipId) {
+  const idxs = heights.map((h, i) => i).filter(i => heights[i] > 0);
+  if (!idxs.length) return { html: '', topY: baseline, totalH: 0 };
+  let totalH = idxs.reduce((s, i) => s + heights[i], 0) + Math.max(0, idxs.length - 1) * segGapPx;
+  const bumped = totalH < 1;
+  if (bumped) totalH = 1;
+  const topY = baseline - totalH;
+  const r = Math.min(4, totalH / 2);
+  const clipShape = totalH <= 8
+    ? `<rect x="${x}" y="${topY}" width="${barWidth}" height="${totalH}" rx="${r}"></rect>`
+    : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barWidth - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barWidth} z"></path>`;
+  let cursorY = baseline, segs = '';
+  idxs.forEach((i, pos) => {
+    const h = bumped ? (pos === idxs.length - 1 ? totalH : 0) : heights[i];
+    if (h > 0) {
+      cursorY -= h;
+      segs += `<rect x="${x}" y="${cursorY}" width="${barWidth}" height="${h}" fill="${colors[i]}"></rect>`;
+      cursorY -= segGapPx;
+    }
+  });
+  return { html: `<clipPath id="${clipId}">${clipShape}</clipPath><g clip-path="url(#${clipId})">${segs}</g>`, topY, totalH };
+}
+
 function renderReportsChart(rows) {
   const weekly = reportsChartGrouping === 'week';
+  const metric = reportsChartMetric; // 'time' | 'ha' | 'both'
   const bucketKey = d => weekly ? isoWeekStartStr(d) : d;
 
   const byDate = new Map();
+  let dataMin = null, dataMax = null;
   rows.forEach(r => {
     const d = r.ustvarjen ? r.ustvarjen.slice(0, 10) : null;
     if (!d) return;
+    if (dataMin === null || d < dataMin) dataMin = d;
+    if (dataMax === null || d > dataMax) dataMax = d;
     const key = bucketKey(d);
-    const bucket = byDate.get(key) || { tracked: 0, gap: 0 };
+    const bucket = byDate.get(key) || { tracked: 0, gap: 0, ha: 0 };
     bucket.tracked += r.tracked_minutes || 0;
     bucket.gap += r.gap_minutes || 0;
+    bucket.ha += r.total_ha || 0;
     byDate.set(key, bucket);
   });
-  const dates = [...byDate.keys()].sort();
+
+  // Walk a continuous day/week range (filter dates if set, else the span
+  // of whatever data is in `rows`) so empty buckets show up as empty bars
+  // instead of being skipped — a quiet week should look quiet, not vanish.
+  const fromVal = reportsDateFrom.value;
+  const toVal = reportsDateTo.value;
+  let rangeStart = fromVal || dataMin;
+  let rangeEnd = toVal || dataMax;
+  if (rangeStart === null) rangeStart = rangeEnd;
+  if (rangeEnd === null) rangeEnd = rangeStart;
+
+  let dates = [];
+  if (rangeStart !== null) {
+    if (weekly) {
+      const wEnd = isoWeekStartStr(rangeEnd);
+      for (let cur = isoWeekStartStr(rangeStart); cur <= wEnd; cur = addDaysStr(cur, 7)) dates.push(cur);
+    } else {
+      for (let cur = rangeStart; cur <= rangeEnd; cur = addDaysStr(cur, 1)) dates.push(cur);
+    }
+  }
+
+  let legendHtml = '<div class="reports-chart-legend">';
+  if (metric === 'time' || metric === 'both') {
+    legendHtml += `<span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
+      <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>`;
+  }
+  if (metric === 'both') {
+    legendHtml += `<span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_HA}"></span>Ha</span>`;
+  }
+  legendHtml += '</div>';
+  // Ha-only is a single series — no legend box needed (marks-and-anatomy.md:
+  // "a single series needs no legend box", the metric toggle itself says what's plotted).
+  if (metric === 'ha') legendHtml = '<div class="reports-chart-legend"></div>';
 
   const modeToolbar = `
     <div class="reports-chart-toolbar">
-      <div class="reports-chart-legend">
-        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_TRACKED}"></span>Zabeležen čas</span>
-        <span class="reports-chart-legend-item"><span class="reports-chart-legend-swatch" style="background:${REPORTS_CHART_COLOR_GAP}"></span>Pot med GERK-i</span>
-      </div>
-      <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz grafa">
-        <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
-        <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+      ${legendHtml}
+      <div class="reports-chart-toggle-group">
+        <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz po obdobju">
+          <button type="button" class="reports-chart-mode-btn${weekly ? ' is-active' : ''}" data-mode="week">Tedensko</button>
+          <button type="button" class="reports-chart-mode-btn${weekly ? '' : ' is-active'}" data-mode="day">Dnevno</button>
+        </div>
+        <div class="reports-chart-mode-toggle" role="group" aria-label="Prikaz količine">
+          <button type="button" class="reports-chart-metric-btn${metric === 'time' ? ' is-active' : ''}" data-metric="time">Čas</button>
+          <button type="button" class="reports-chart-metric-btn${metric === 'ha' ? ' is-active' : ''}" data-metric="ha">Ha</button>
+          <button type="button" class="reports-chart-metric-btn${metric === 'both' ? ' is-active' : ''}" data-metric="both">Oboje</button>
+        </div>
       </div>
     </div>`;
 
   if (!dates.length) {
     reportsChartWrap.innerHTML = modeToolbar + '<div class="reports-chart-empty">Ni podatkov za graf.</div>';
-    wireReportsChartModeToggle();
+    wireReportsChartToolbar();
     return;
   }
 
   // Weekly bars need a wider band than daily ones — their label ("11.9.–17.9.")
-  // is roughly twice as wide as a day label ("11.9."), so every bar can
-  // carry its own label without the thinning fallback below kicking in.
-  const barW = 24, segGapPx = 2, bandPad = weekly ? 46 : 14;
-  const bandW = barW + bandPad;
-  const plotH = 180, axisH = 34, topPad = 8;
+  // is roughly twice as wide as a day label ("11.9."); "Oboje" needs room for
+  // two side-by-side bars instead of one. bandW is whichever of those two
+  // needs is bigger, so every bar can carry its own label.
+  const barWSingle = 24, barWBoth = 16, pairGapPx = 3, segGapPx = 2;
+  const contentW = metric === 'both' ? (barWBoth * 2 + pairGapPx) : barWSingle;
+  const weeklyLabelNeed = 70, dailyLabelNeed = 34;
+  const bandW = Math.max(weekly ? weeklyLabelNeed : dailyLabelNeed, contentW + 14);
+  const plotH = 180, axisH = 34;
+  // "Oboje" direct-labels each Ha bar's tip (see below) — extra top padding
+  // so that label never clips against the SVG edge on a tall bar.
+  const topPad = metric === 'both' ? 20 : 8;
   const leftPad = 44;
   const svgW = leftPad + dates.length * bandW + 8;
   const svgH = topPad + plotH + axisH;
   const baseline = topPad + plotH;
 
   // Thin out x-axis text so labels never overlap regardless of how many
-  // bars there are — a day label ("11.9.") needs ~34px, a week-range one
-  // ("11.9.–17.9.") needs ~70px; skip every Nth one once bars are
-  // narrower than that.
-  const labelStep = Math.max(1, Math.ceil((weekly ? 70 : 34) / bandW));
+  // bars there are.
+  const labelStep = Math.max(1, Math.ceil((weekly ? weeklyLabelNeed : dailyLabelNeed) / bandW));
 
-  const maxTotal = Math.max(...dates.map(d => byDate.get(d).tracked + byDate.get(d).gap));
-  const niceMax = reportsChartNiceMax(maxTotal);
-  const yScale = v => (v / niceMax) * plotH;
+  const maxTimeTotal = Math.max(0, ...dates.map(d => { const b = byDate.get(d); return b ? b.tracked + b.gap : 0; }));
+  const maxHaTotal = Math.max(0, ...dates.map(d => { const b = byDate.get(d); return b ? b.ha : 0; }));
+  const timeNiceMax = Math.max(120, Math.ceil(maxTimeTotal / 120) * 120);
+  const haNiceMax = reportsChartNiceMaxHa(maxHaTotal);
+  const timeScale = v => (v / timeNiceMax) * plotH;
+  const haScale = v => (v / haNiceMax) * plotH;
 
-  const gridSteps = 4;
+  // Time is the only formal axis — fixed 2h gridlines, 10h called out as the
+  // reference full-workday line. Ha only gets its own axis when it's the
+  // sole metric; in "Oboje" it's direct-labeled per bar instead (no second
+  // y-scale on the same plot — see dataviz skill's one-axis rule).
   let gridlines = '';
-  for (let i = 0; i <= gridSteps; i++) {
-    const v = (niceMax / gridSteps) * i;
-    const y = baseline - yScale(v);
-    gridlines += `<line class="reports-chart-gridline" x1="${leftPad}" y1="${y}" x2="${svgW - 8}" y2="${y}"></line>`;
-    gridlines += `<text class="reports-chart-axis-label" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(fmtHM(Math.round(v)))}</text>`;
+  if (metric === 'time' || metric === 'both') {
+    for (let mins = 0; mins <= timeNiceMax; mins += 120) {
+      const y = baseline - (mins / timeNiceMax) * plotH;
+      const isRef = mins === 600;
+      gridlines += `<line class="reports-chart-gridline${isRef ? ' reports-chart-gridline--ref' : ''}" x1="${leftPad}" y1="${y}" x2="${svgW - 8}" y2="${y}"></line>`;
+      gridlines += `<text class="reports-chart-axis-label${isRef ? ' reports-chart-axis-label--ref' : ''}" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(fmtHM(mins))}</text>`;
+    }
+  } else {
+    const steps = 4;
+    for (let i = 0; i <= steps; i++) {
+      const v = (haNiceMax / steps) * i;
+      const y = baseline - (v / haNiceMax) * plotH;
+      gridlines += `<line class="reports-chart-gridline" x1="${leftPad}" y1="${y}" x2="${svgW - 8}" y2="${y}"></line>`;
+      gridlines += `<text class="reports-chart-axis-label" x="${leftPad - 8}" y="${y + 3}" text-anchor="end">${escHtml(fmtHa(Math.round(v * 100) / 100))}</text>`;
+    }
   }
 
   let bars = '';
   dates.forEach((d, i) => {
-    const { tracked, gap: gapMin } = byDate.get(d);
-    const x = leftPad + i * bandW + bandPad / 2;
-    const trackedH = yScale(tracked);
-    const gapH = yScale(gapMin);
-    const segGap = (trackedH > 0 && gapH > 0) ? segGapPx : 0;
-    const totalH = Math.max(trackedH + segGap + gapH, (tracked + gapMin) > 0 ? 1 : 0);
-    const topY = baseline - totalH;
-    const r = Math.min(4, totalH / 2);
-    const clipId = `reportsChartClip${i}`;
-
-    const clipShape = totalH <= 8
-      ? `<rect x="${x}" y="${topY}" width="${barW}" height="${totalH}" rx="${r}"></rect>`
-      : `<path d="M${x},${topY + r} a${r},${r} 0 0 1 ${r},-${r} h${barW - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${totalH - r} h-${barW} z"></path>`;
-
-    let segs = '';
-    if (trackedH > 0) {
-      segs += `<rect x="${x}" y="${baseline - trackedH}" width="${barW}" height="${trackedH}" fill="${REPORTS_CHART_COLOR_TRACKED}"></rect>`;
-    }
-    if (gapH > 0) {
-      segs += `<rect x="${x}" y="${baseline - trackedH - segGap - gapH}" width="${barW}" height="${gapH}" fill="${REPORTS_CHART_COLOR_GAP}"></rect>`;
-    }
+    const b = byDate.get(d) || { tracked: 0, gap: 0, ha: 0 };
+    const bandLeft = leftPad + i * bandW;
+    const contentLeft = bandLeft + (bandW - contentW) / 2;
 
     let label, tooltipLabel;
     if (weekly) {
-      const weekEnd = new Date(d + 'T00:00:00');
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      const weekEndStr = weekEnd.toISOString().slice(0, 10);
+      const weekEndStr = addDaysStr(d, 6);
       label = `${fmtDayMonth(d)}–${fmtDayMonth(weekEndStr)}`;
       tooltipLabel = `Teden ${fmtSampleDate(d)}–${fmtSampleDate(weekEndStr)}`;
     } else {
       label = fmtDayMonth(d);
       tooltipLabel = fmtSampleDate(d);
     }
-    const tooltipText = `${tooltipLabel} — Zabeležen: ${fmtHM(tracked)}, Pot med GERK-i: ${fmtHM(gapMin)}, skupaj: ${fmtHM(tracked + gapMin)}`;
+
+    let marksHtml = '';
+    const tooltipParts = [];
+
+    if (metric === 'time' || metric === 'both') {
+      const barWidth = metric === 'both' ? barWBoth : barWSingle;
+      const built = reportsChartRoundedBar(contentLeft, barWidth, baseline,
+        [timeScale(b.tracked), timeScale(b.gap)], [REPORTS_CHART_COLOR_TRACKED, REPORTS_CHART_COLOR_GAP],
+        segGapPx, `reportsChartClipT${i}`);
+      marksHtml += built.html;
+      tooltipParts.push(`Zabeležen: ${fmtHM(b.tracked)}`, `Pot med GERK-i: ${fmtHM(b.gap)}`, `skupaj: ${fmtHM(b.tracked + b.gap)}`);
+    }
+    if (metric === 'ha' || metric === 'both') {
+      const haBarWidth = metric === 'both' ? barWBoth : barWSingle;
+      const haX = metric === 'both' ? contentLeft + barWBoth + pairGapPx : contentLeft;
+      const built = reportsChartRoundedBar(haX, haBarWidth, baseline, [haScale(b.ha)], [REPORTS_CHART_COLOR_HA], 0, `reportsChartClipH${i}`);
+      marksHtml += built.html;
+      if (metric === 'both' && b.ha > 0) {
+        marksHtml += `<text class="reports-chart-tip-label" x="${haX + haBarWidth / 2}" y="${built.topY - 4}" text-anchor="middle">${escHtml(fmtHa(Math.round(b.ha * 100) / 100))}</text>`;
+      }
+      tooltipParts.push(`Ha: ${fmtHa(Math.round(b.ha * 100) / 100)}`);
+    }
+
+    const tooltipText = `${tooltipLabel} — ${tooltipParts.join(', ')}`;
     const showLabel = i % labelStep === 0;
 
     bars += `<g>
-      <clipPath id="${clipId}">${clipShape}</clipPath>
-      <g clip-path="url(#${clipId})">${segs}</g>
+      ${marksHtml}
       <rect class="reports-chart-bar-hit" data-tooltip="${escHtml(tooltipText)}"
-            x="${x - bandPad / 2}" y="${topPad}" width="${bandW}" height="${plotH}"
+            x="${bandLeft}" y="${topPad}" width="${bandW}" height="${plotH}"
             fill="transparent" tabindex="0" aria-label="${escHtml(tooltipText)}"><title>${escHtml(tooltipText)}</title></rect>
-      ${showLabel ? `<text class="reports-chart-axis-label" x="${x + barW / 2}" y="${baseline + 16}" text-anchor="middle">${escHtml(label)}</text>` : ''}
+      ${showLabel ? `<text class="reports-chart-axis-label" x="${bandLeft + bandW / 2}" y="${baseline + 16}" text-anchor="middle">${escHtml(label)}</text>` : ''}
     </g>`;
   });
 
   reportsChartWrap.innerHTML = modeToolbar +
     `<svg class="reports-chart-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">${gridlines}${bars}</svg>`;
-  wireReportsChartModeToggle();
+  wireReportsChartToolbar();
 
   const tooltip = document.createElement('div');
   tooltip.className = 'reports-chart-tooltip';
@@ -3634,11 +3779,18 @@ function renderReportsChart(rows) {
   });
 }
 
-function wireReportsChartModeToggle() {
+function wireReportsChartToolbar() {
   reportsChartWrap.querySelectorAll('.reports-chart-mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if (reportsChartGrouping === btn.dataset.mode) return;
       reportsChartGrouping = btn.dataset.mode;
+      renderReportsChart(filteredReportsRows());
+    });
+  });
+  reportsChartWrap.querySelectorAll('.reports-chart-metric-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (reportsChartMetric === btn.dataset.metric) return;
+      reportsChartMetric = btn.dataset.metric;
       renderReportsChart(filteredReportsRows());
     });
   });
@@ -3733,19 +3885,11 @@ reportsStatusFilterMenu.querySelectorAll('.reports-status-filter-cb').forEach(cb
 });
 
 reportsOperatorFilter.addEventListener('change', renderReportsTable);
-reportsDateFrom.addEventListener('change', renderReportsTable);
-reportsDateTo.addEventListener('change', renderReportsTable);
-
-reportsSearchStranka.addEventListener('input', () => {
-  reportsSearchClearBtn.hidden = !reportsSearchStranka.value;
-  renderReportsTable();
-});
-reportsSearchClearBtn.addEventListener('click', () => {
-  reportsSearchStranka.value = '';
-  reportsSearchClearBtn.hidden = true;
-  renderReportsTable();
-  reportsSearchStranka.focus();
-});
+reportsCustomerFilter.addEventListener('change', renderReportsTable);
+// Date range also reshapes which customers are even offered in the
+// dropdown (it's date-filtered) — repopulate before re-rendering.
+reportsDateFrom.addEventListener('change', () => { populateReportsCustomerFilter(); renderReportsTable(); });
+reportsDateTo.addEventListener('change', () => { populateReportsCustomerFilter(); renderReportsTable(); });
 
 // ── Operators (Izvajalci) modal ───────────────────────────────
 function showOperatorsError(msg) {

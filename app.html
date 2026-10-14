@@ -269,16 +269,19 @@
           </select>
           <label class="reports-date-field">Od <input type="date" id="reportsDateFrom"></label>
           <label class="reports-date-field">Do <input type="date" id="reportsDateTo"></label>
-          <div class="wo-search-wrap reports-search-wrap">
-            <input type="text" id="reportsSearchStranka" class="wo-search-input" placeholder="Išči stranko..." autocomplete="off">
-            <button type="button" id="reportsSearchClearBtn" class="wo-search-clear" title="Počisti iskanje" aria-label="Počisti iskanje" hidden>✕</button>
-          </div>
+          <!-- Dropdown, not free-text search — options are rebuilt from
+               whichever customers actually have rows inside the current
+               Od/Do range, see populateReportsCustomerFilter() in app.js. -->
+          <select id="reportsCustomerFilter" class="field-input field-select reports-customer-filter reports-search-wrap">
+            <option value="">Vse stranke</option>
+          </select>
         </div>
 
-        <!-- Stacked bar chart: total time per date, split into Zabeležen
-             (tracked) / Pot med GERK-i (gap) — reads filteredReportsRows(),
-             re-rendered by renderReportsTable() so it always matches the
-             table below. See renderReportsChart() in app.js. -->
+        <!-- Bar chart: per day/week (toggle, default weekly), Čas (stacked
+             Zabeležen/Pot med GERK-i) or Ha or both side by side (toggle,
+             default Čas) — reads filteredReportsRows(), re-rendered by
+             renderReportsTable() so it always matches the table below.
+             See renderReportsChart() in app.js. -->
         <div id="reportsChartWrap" class="reports-chart-wrap"></div>
 
         <div id="reportsError" class="alert alert-error" hidden role="alert"></div>
