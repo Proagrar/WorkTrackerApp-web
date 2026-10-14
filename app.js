@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.97';
+const APP_VERSION = 'v3.98';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -4231,7 +4231,7 @@ function renderWorkOrders() {
       ? `<span class="wo-select-cell"><input type="checkbox" class="wo-select-checkbox" data-id="${escHtml(r.id)}" aria-label="Izberi nalog" ${selectedWorkOrderIds.has(r.id) ? 'checked' : ''}></span>`
       : '';
     return `
-      <div class="log-compact wo-compact ${rowMod}${r.status === 'Izvedeno' ? ' wo-compact--izvedeno' : ''}${r.deleted ? ' wo-compact--deleted' : ''}" role="listitem" data-action="wo-open" data-id="${escHtml(r.id)}">
+      <div class="log-compact wo-compact ${rowMod}${r.status === 'Izvedeno' ? ' wo-compact--izvedeno' : ''}${r.status === 'V delu' ? ' wo-compact--delo' : ''}${r.deleted ? ' wo-compact--deleted' : ''}" role="listitem" data-action="wo-open" data-id="${escHtml(r.id)}">
         ${checkboxCell}
         <span class="lc-date">${escHtml(r.stevilka)}</span>
         <span class="wo-c-vnos">${fmtSampleDate(r.vnos)}</span>

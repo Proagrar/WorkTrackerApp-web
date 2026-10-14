@@ -25,6 +25,12 @@
   --success-bg:  #F0FDF4;
   --danger:      #DC2626;
   --danger-hover:#B91C1C;
+  /* Same amber already used for "not yet done" elsewhere (the map
+     overview's status coloring, woMapStatusColor() in app.js, and the
+     ha summary's Plan chip) — "V delu" reuses it instead of its own
+     one-off color. */
+  --warning:     #92400E;
+  --warning-bg:  #FEF3C7;
 
   --radius-sm:  6px;
   --radius-md:  12px;
@@ -549,7 +555,7 @@ input, select, textarea { font-family: inherit; }
    still reads as a compact pill instead of a wide bar. */
 .wo-compact .wo-status-badge { justify-self: start; }
 .wo-status--plan     { background: var(--border-light); color: var(--text-secondary); }
-.wo-status--delo     { background: var(--blue-100);      color: var(--blue-800); }
+.wo-status--delo     { background: var(--warning-bg);    color: var(--warning); }
 .wo-status--izvedeno { background: var(--success-bg);    color: var(--success); }
 .wo-status--racun    { background: #EDE9FE;               color: #6D28D9; }
 
@@ -570,6 +576,7 @@ input, select, textarea { font-family: inherit; }
 
 .wo-compact { cursor: pointer; }
 .wo-compact--izvedeno { background: var(--success-bg); }
+.wo-compact--delo { background: var(--warning-bg); }
 .wo-compact--deleted { opacity: .6; }
 .wo-compact--deleted .lc-date { text-decoration: line-through; }
 
