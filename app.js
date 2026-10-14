@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.103';
+const APP_VERSION = 'v3.104';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -3505,14 +3505,20 @@ function updateReportsStatusFilterButtonLabel() {
   reportsStatusFilterBtn.textContent = n === 0 ? 'Vsi statusi' : n === 1 ? [...reportsStatusValues][0] : `${n} statusi`;
 }
 
-// Selected rows' totals when one or more are checked, otherwise every
-// currently filtered row's totals — same pattern as the main list's ha
-// chips (updateWoHaSummary()). Rates are recomputed from the summed
-// totals, not averaged per-row (averaging rates would be wrong here).
-function updateReportsSummary(filteredRows) {
-  const source = selectedReportIds.size
+// Selected rows when one or more are checked, otherwise every currently
+// filtered row — the summary chips and the chart both narrow to the
+// checked rows this way, same pattern as the main list's ha chips
+// (updateWoHaSummary()).
+function reportsEffectiveRows(filteredRows) {
+  return selectedReportIds.size
     ? reportsData.filter(r => selectedReportIds.has(r.work_order_id))
     : filteredRows;
+}
+
+// Rates are recomputed from the summed totals, not averaged per-row
+// (averaging rates would be wrong here).
+function updateReportsSummary(filteredRows) {
+  const source = reportsEffectiveRows(filteredRows);
   let ha = 0, tracked = 0, gap = 0, captures = 0;
   for (const r of source) {
     ha += Number(r.total_ha) || 0;
@@ -3756,7 +3762,7 @@ function wireReportsChartToolbar() {
 function renderReportsTable() {
   const rows = filteredReportsRows();
   updateReportsSummary(rows);
-  renderReportsChart(rows);
+  renderReportsChart(reportsEffectiveRows(rows));
 
   if (!rows.length) {
     reportsListWrap.innerHTML = '<div class="state-empty"><p>Ni delovnih nalogov za izbrane filtre.</p></div>';
@@ -3822,6 +3828,7 @@ function renderReportsTable() {
       else selectedReportIds.delete(cb.dataset.id);
       updateReportsSummary(rows);
       syncReportsSelectAllCheckbox(visibleIds);
+      renderReportsChart(reportsEffectiveRows(rows));
     });
   });
 }
