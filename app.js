@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.105';
+const APP_VERSION = 'v3.106';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -3790,7 +3790,7 @@ function renderReportsTable() {
             <th>Točk / h</th>
             <th>Točk / ha</th>
             <th title="Ha / točko">Ha / točko</th>
-            <th title="Zabeležen čas / število GERK-ov">Čas / GERK</th>
+            <th title="Zabeležen čas / skupni ha">Čas / ha</th>
             <th title="Ha na uro zabeleženega časa, brez poti">Ha/h</th>
             <th title="Ha na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
             <th title="Prevoz s traktorjem (čas na poti)">Prevoz traktor</th>
@@ -3805,8 +3805,7 @@ function renderReportsTable() {
             const perHour = hours > 0 ? (r.captures_count / hours).toFixed(2) : '—';
             const perHa = r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—';
             const haPerCapture = r.captures_count > 0 ? (r.total_ha / r.captures_count).toFixed(3) : '—';
-            const gerkCount = r.gerk_count || 0;
-            const timePerGerk = gerkCount > 0 ? fmtHM(Math.round(r.tracked_minutes / gerkCount)) : '—';
+            const timePerHa = r.total_ha > 0 ? fmtHM(Math.round(r.tracked_minutes / r.total_ha)) : '—';
             const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
             const haPerHour = hours > 0 ? (r.total_ha / hours).toFixed(2) : '—';
             const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
@@ -3829,7 +3828,7 @@ function renderReportsTable() {
               <td>${perHour}</td>
               <td>${perHa}</td>
               <td>${haPerCapture}</td>
-              <td>${timePerGerk}</td>
+              <td>${timePerHa}</td>
               <td>${haPerHour}</td>
               <td>${haPerHourWithRoad}</td>
               <td>${fmtHM(r.road_traktor_minutes || 0)}</td>
