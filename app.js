@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.106';
+const APP_VERSION = 'v3.107';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -3419,6 +3419,7 @@ async function loadReportsData() {
   reportsError.hidden = true;
   reportsListWrap.innerHTML = '<div class="state-loading"><div class="spinner"></div><p>Nalaganje...</p></div>';
   selectedReportIds = new Set();
+  resetReportsStatusFilterDefault();
   const { data, error } = await supabase.rpc('get_work_orders_report');
   if (error) {
     reportsError.textContent = 'Napaka pri nalaganju poročila: ' + error.message;
@@ -3430,6 +3431,18 @@ async function loadReportsData() {
   populateReportsOperatorFilter();
   populateReportsCustomerFilter();
   renderReportsTable();
+}
+
+// Poročila opens defaulting to "Izvedeno" (the view the reports are
+// normally wanted for — in-progress/planned orders skew the numbers)
+// instead of showing everything — same checklist the status filter
+// button already uses, just pre-checked.
+function resetReportsStatusFilterDefault() {
+  reportsStatusValues = new Set(['Izvedeno']);
+  reportsStatusFilterMenu.querySelectorAll('.reports-status-filter-cb').forEach(cb => {
+    cb.checked = reportsStatusValues.has(cb.value);
+  });
+  updateReportsStatusFilterButtonLabel();
 }
 
 // Only operators who actually appear in the data — not the full eligible
@@ -3482,6 +3495,45 @@ function updateReportsCustomerFilterButtonLabel() {
   const n = reportsCustomerValues.size;
   reportsCustomerFilterBtn.textContent = n === 0 ? 'Vse stranke' : n === 1 ? [...reportsCustomerValues][0] : `${n} strank`;
   reportsCustomerFilterBtn.title = n > 1 ? [...reportsCustomerValues].join(', ') : '';
+}
+
+// Derived ratios shared by each order row and the totals row — totals
+// recompute these from the summed fields rather than averaging each row's
+// own ratio (averaging rates would be wrong), same principle already used
+// in updateReportsSummary().
+function reportsRowMetrics(r) {
+  const hours = r.tracked_minutes / 60;
+  const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
+  const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
+  const workRoadTotal = r.tracked_minutes + roadMinutes;
+  return {
+    perHour: hours > 0 ? (r.captures_count / hours).toFixed(2) : '—',
+    perHa: r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—',
+    haPerCapture: r.captures_count > 0 ? (r.total_ha / r.captures_count).toFixed(3) : '—',
+    timePerHa: r.total_ha > 0 ? fmtHM(Math.round(r.tracked_minutes / r.total_ha)) : '—',
+    haPerHour: hours > 0 ? (r.total_ha / hours).toFixed(2) : '—',
+    haPerHourWithRoad: hoursWithRoad > 0 ? (r.total_ha / hoursWithRoad).toFixed(2) : '—',
+    workRoadPct: workRoadTotal > 0 ? `${Math.round(r.tracked_minutes / workRoadTotal * 100)}%` : '—',
+    strosek: r.strosek != null ? `${Number(r.strosek).toFixed(2)} €` : '—',
+  };
+}
+
+// Sums every raw field the per-row columns are built from, across whatever
+// rows are currently "in scope" (selected, or filtered if none selected) —
+// reportsRowMetrics() then turns this into the same ratio columns.
+function reportsAggregateRow(rowsForTotal) {
+  const agg = { total_ha: 0, tracked_minutes: 0, gap_minutes: 0, total_minutes: 0, captures_count: 0, road_traktor_minutes: 0, road_avto_minutes: 0, strosek: 0 };
+  for (const r of rowsForTotal) {
+    agg.total_ha += Number(r.total_ha) || 0;
+    agg.tracked_minutes += r.tracked_minutes || 0;
+    agg.gap_minutes += r.gap_minutes || 0;
+    agg.total_minutes += r.total_minutes || 0;
+    agg.captures_count += r.captures_count || 0;
+    agg.road_traktor_minutes += r.road_traktor_minutes || 0;
+    agg.road_avto_minutes += r.road_avto_minutes || 0;
+    agg.strosek += Number(r.strosek) || 0;
+  }
+  return agg;
 }
 
 function filteredReportsRows() {
@@ -3800,19 +3852,33 @@ function renderReportsTable() {
           </tr>
         </thead>
         <tbody>
+          ${(() => {
+            const effectiveRows = reportsEffectiveRows(rows);
+            const totals = reportsAggregateRow(effectiveRows);
+            const tm = reportsRowMetrics(totals);
+            const totalsLabel = selectedReportIds.size ? `Izbrano (${effectiveRows.length})` : `Skupaj (${effectiveRows.length})`;
+            return `<tr class="reports-totals-row">
+              <td></td>
+              <td colspan="4">${escHtml(totalsLabel)}</td>
+              <td>${totals.total_ha.toFixed(2)}</td>
+              <td>${fmtHM(totals.tracked_minutes)}</td>
+              <td>${fmtHM(totals.gap_minutes)}</td>
+              <td>${fmtHM(totals.total_minutes)}</td>
+              <td>${totals.captures_count}</td>
+              <td>${tm.perHour}</td>
+              <td>${tm.perHa}</td>
+              <td>${tm.haPerCapture}</td>
+              <td>${tm.timePerHa}</td>
+              <td>${tm.haPerHour}</td>
+              <td>${tm.haPerHourWithRoad}</td>
+              <td>${fmtHM(totals.road_traktor_minutes)}</td>
+              <td>${fmtHM(totals.road_avto_minutes)}</td>
+              <td>${tm.workRoadPct}</td>
+              <td>${tm.strosek}</td>
+            </tr>`;
+          })()}
           ${rows.map(r => {
-            const hours = r.tracked_minutes / 60;
-            const perHour = hours > 0 ? (r.captures_count / hours).toFixed(2) : '—';
-            const perHa = r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—';
-            const haPerCapture = r.captures_count > 0 ? (r.total_ha / r.captures_count).toFixed(3) : '—';
-            const timePerHa = r.total_ha > 0 ? fmtHM(Math.round(r.tracked_minutes / r.total_ha)) : '—';
-            const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
-            const haPerHour = hours > 0 ? (r.total_ha / hours).toFixed(2) : '—';
-            const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
-            const haPerHourWithRoad = hoursWithRoad > 0 ? (r.total_ha / hoursWithRoad).toFixed(2) : '—';
-            const workRoadTotal = r.tracked_minutes + roadMinutes;
-            const workRoadPct = workRoadTotal > 0 ? `${Math.round(r.tracked_minutes / workRoadTotal * 100)}%` : '—';
-            const strosek = r.strosek != null ? `${Number(r.strosek).toFixed(2)} €` : '—';
+            const m = reportsRowMetrics(r);
             const checked = selectedReportIds.has(r.work_order_id) ? 'checked' : '';
             return `<tr>
               <td><input type="checkbox" class="reports-row-cb" data-id="${r.work_order_id}" ${checked}></td>
@@ -3825,16 +3891,16 @@ function renderReportsTable() {
               <td>${fmtHM(r.gap_minutes)}</td>
               <td>${fmtHM(r.total_minutes)}</td>
               <td>${r.captures_count}</td>
-              <td>${perHour}</td>
-              <td>${perHa}</td>
-              <td>${haPerCapture}</td>
-              <td>${timePerHa}</td>
-              <td>${haPerHour}</td>
-              <td>${haPerHourWithRoad}</td>
+              <td>${m.perHour}</td>
+              <td>${m.perHa}</td>
+              <td>${m.haPerCapture}</td>
+              <td>${m.timePerHa}</td>
+              <td>${m.haPerHour}</td>
+              <td>${m.haPerHourWithRoad}</td>
               <td>${fmtHM(r.road_traktor_minutes || 0)}</td>
               <td>${fmtHM(r.road_avto_minutes || 0)}</td>
-              <td>${workRoadPct}</td>
-              <td>${strosek}</td>
+              <td>${m.workRoadPct}</td>
+              <td>${m.strosek}</td>
             </tr>`;
           }).join('')}
         </tbody>

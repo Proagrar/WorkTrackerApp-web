@@ -1442,6 +1442,17 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
    needs to reach for the horizontal scrollbar .reports-table-wrap
    already provides. */
 .reports-data-table th, .reports-data-table td { padding: 8px 10px; }
+/* Always the first body row — totals for whatever's in scope (selected
+   rows, or every filtered row if none are selected), recomputed from the
+   summed fields rather than averaged per-row. See reportsRowMetrics()/
+   reportsAggregateRow() in app.js. */
+.reports-totals-row td {
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--border-light);
+  border-top: none;
+  border-bottom: 1.5px solid var(--border);
+}
 
 .wo-toolbar {
   /* Now the only child of .section-header (the "Delovni Nalogi" title
