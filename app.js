@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.104';
+const APP_VERSION = 'v3.105';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -221,6 +221,7 @@ const reportsChipHa           = document.getElementById('reportsChipHa');
 const reportsChipTracked      = document.getElementById('reportsChipTracked');
 const reportsChipGap          = document.getElementById('reportsChipGap');
 const reportsChipTotal        = document.getElementById('reportsChipTotal');
+const reportsChipCost         = document.getElementById('reportsChipCost');
 
 // ── Operators (Izvajalci) modal refs ────────────────────────────
 const operatorsModal      = document.getElementById('operatorsModal');
@@ -3519,18 +3520,20 @@ function reportsEffectiveRows(filteredRows) {
 // (averaging rates would be wrong here).
 function updateReportsSummary(filteredRows) {
   const source = reportsEffectiveRows(filteredRows);
-  let ha = 0, tracked = 0, gap = 0, captures = 0;
+  let ha = 0, tracked = 0, gap = 0, captures = 0, cost = 0;
   for (const r of source) {
     ha += Number(r.total_ha) || 0;
     tracked += r.tracked_minutes || 0;
     gap += r.gap_minutes || 0;
     captures += r.captures_count || 0;
+    cost += Number(r.strosek) || 0;
   }
   const label = selectedReportIds.size ? 'Izbrano' : 'Skupaj';
   reportsChipHa.textContent = `${label}: ${ha.toFixed(2)} ha`;
   reportsChipTracked.textContent = `Zabeležen: ${fmtHM(tracked)}`;
   reportsChipGap.textContent = `Med GERK-i: ${fmtHM(gap)}`;
   reportsChipTotal.textContent = `Skupaj čas: ${fmtHM(tracked + gap)}`;
+  reportsChipCost.textContent = `Strošek: ${cost.toFixed(2)} €`;
 }
 
 function syncReportsSelectAllCheckbox(visibleIds) {
@@ -3786,6 +3789,14 @@ function renderReportsTable() {
             <th title="Zajete točke">Točke</th>
             <th>Točk / h</th>
             <th>Točk / ha</th>
+            <th title="Ha / točko">Ha / točko</th>
+            <th title="Zabeležen čas / število GERK-ov">Čas / GERK</th>
+            <th title="Ha na uro zabeleženega časa, brez poti">Ha/h</th>
+            <th title="Ha na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
+            <th title="Prevoz s traktorjem (čas na poti)">Prevoz traktor</th>
+            <th title="Prevoz z avtom (čas na poti)">Prevoz avto</th>
+            <th title="Delež zabeleženega časa v skupnem času (delo + pot)">Delo / pot</th>
+            <th title="Celotni strošek naloga">Strošek</th>
           </tr>
         </thead>
         <tbody>
@@ -3793,6 +3804,16 @@ function renderReportsTable() {
             const hours = r.tracked_minutes / 60;
             const perHour = hours > 0 ? (r.captures_count / hours).toFixed(2) : '—';
             const perHa = r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—';
+            const haPerCapture = r.captures_count > 0 ? (r.total_ha / r.captures_count).toFixed(3) : '—';
+            const gerkCount = r.gerk_count || 0;
+            const timePerGerk = gerkCount > 0 ? fmtHM(Math.round(r.tracked_minutes / gerkCount)) : '—';
+            const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
+            const haPerHour = hours > 0 ? (r.total_ha / hours).toFixed(2) : '—';
+            const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
+            const haPerHourWithRoad = hoursWithRoad > 0 ? (r.total_ha / hoursWithRoad).toFixed(2) : '—';
+            const workRoadTotal = r.tracked_minutes + roadMinutes;
+            const workRoadPct = workRoadTotal > 0 ? `${Math.round(r.tracked_minutes / workRoadTotal * 100)}%` : '—';
+            const strosek = r.strosek != null ? `${Number(r.strosek).toFixed(2)} €` : '—';
             const checked = selectedReportIds.has(r.work_order_id) ? 'checked' : '';
             return `<tr>
               <td><input type="checkbox" class="reports-row-cb" data-id="${r.work_order_id}" ${checked}></td>
@@ -3807,6 +3828,14 @@ function renderReportsTable() {
               <td>${r.captures_count}</td>
               <td>${perHour}</td>
               <td>${perHa}</td>
+              <td>${haPerCapture}</td>
+              <td>${timePerGerk}</td>
+              <td>${haPerHour}</td>
+              <td>${haPerHourWithRoad}</td>
+              <td>${fmtHM(r.road_traktor_minutes || 0)}</td>
+              <td>${fmtHM(r.road_avto_minutes || 0)}</td>
+              <td>${workRoadPct}</td>
+              <td>${strosek}</td>
             </tr>`;
           }).join('')}
         </tbody>
