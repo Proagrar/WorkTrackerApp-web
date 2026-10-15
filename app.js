@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.107';
+const APP_VERSION = 'v3.108';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -1290,6 +1290,13 @@ function updateOrderHeader() {
   }
 
   woImportZonesWrap.hidden = !isAdmin;
+  // Manual "+ Dodaj GERK" — the handler and datalist were always wired
+  // (loadCustomerGerkDatalist() in openWorkOrderDetail()), this wrapper
+  // was just never un-hidden, so KML import was the only way in. Works
+  // regardless of status (Plan/V delu/Izvedeno) — see
+  // migration_sync_status_on_gerk_assignment.sql for why adding a GERK
+  // to an "Izvedeno" order now correctly drops it back to "V delu".
+  woAddExistingGerkWrap.hidden = !isAdmin;
 
   // Delete (archive) / restore — mutually exclusive on deleted_at, admin-only.
   const isDeleted = !!wo.deleted_at;
