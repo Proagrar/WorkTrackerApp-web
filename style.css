@@ -1066,6 +1066,24 @@ input, select, textarea { font-family: inherit; }
   border-top: 1px solid var(--border-light);
 }
 
+/* "Don't collect this one" comments ("ne", "ne pobereš"/"ne poberes")
+   flagged red — both the row and its comment input, plus a dot on the
+   collapsed toggle so it's visible without expanding the panel. */
+.wlg-sample-row--flagged { background: var(--error-bg); }
+.wlg-comment-input--flagged {
+  border-color: var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+  font-weight: 600;
+}
+.wlg-sample-flag-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--error);
+  flex-shrink: 0;
+}
+
 .sample-field-input {
   font-family: inherit;
   font-size: .78125rem;

@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.109';
+const APP_VERSION = 'v3.110';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -79,9 +79,18 @@ const woStatusBadge = document.getElementById('woStatusBadge');
 const woDeleteBtn = document.getElementById('woDeleteBtn');
 const woRestoreBtn = document.getElementById('woRestoreBtn');
 const woAddExistingGerkWrap = document.getElementById('woAddExistingGerkWrap');
-const woAddExistingGerkCode = document.getElementById('woAddExistingGerkCode');
-const woExistingGerkList = document.getElementById('woExistingGerkList');
+const woAddExistingGerkPaste = document.getElementById('woAddExistingGerkPaste');
 const woAddExistingGerkBtn = document.getElementById('woAddExistingGerkBtn');
+const woExportSamplingWrap      = document.getElementById('woExportSamplingWrap');
+const woExportSamplingBtn       = document.getElementById('woExportSamplingBtn');
+const exportSamplingModal       = document.getElementById('exportSamplingModal');
+const exportSamplingModalClose  = document.getElementById('exportSamplingModalClose');
+const exportSamplingList        = document.getElementById('exportSamplingList');
+const exportSamplingSelectAllCb = document.getElementById('exportSamplingSelectAllCb');
+const exportSamplingNote        = document.getElementById('exportSamplingNote');
+const exportSamplingErrorEl     = document.getElementById('exportSamplingError');
+const exportSamplingCancelBtn   = document.getElementById('exportSamplingCancelBtn');
+const exportSamplingConfirmBtn  = document.getElementById('exportSamplingConfirmBtn');
 const woImportZonesWrap = document.getElementById('woImportZonesWrap');
 const woKmlInput = document.getElementById('woKmlInput');
 const woImportZonesPickBtn = document.getElementById('woImportZonesPickBtn');
@@ -750,6 +759,83 @@ function addGerkSegments(row, segments) {
   row.querySelector('.gerk-segments-toggle').classList.add('wlg-samples-toggle--open');
 }
 
+// Shared by the create-order form's paste button AND an existing order's
+// "+ Dodaj GERK-e" (manual add) — same accepted formats either way: a
+// plain code list (comma/semicolon-separated, or one code[+ha] pasted
+// per Excel row), or the lab's 4+ column "GERK/Ha/FMS/Sample no[/
+// Vzorčenje]" segment sheet. Returns [{ code, hectares, segments }] —
+// segments is null for a plain code-list paste, an array of
+// {fms, sampleNo, vzorcenje} for a segment-sheet paste. Each caller
+// applies these to its own target (in-memory form rows vs. direct DB
+// inserts) — only the parsing is shared.
+function parseGerkPasteText(text) {
+  // Don't trim whole lines here — a continuation row copied out of a
+  // lab's 4-column sheet ("GERK/Ha/FMS/Sample no") is literally
+  // "\t\t\t11722" (blank GERK/Ha/FMS, only the sample number), and
+  // trimming would eat those leading tabs and destroy which column
+  // the "11722" actually came from.
+  const rawLines = text.split('\n').filter(l => l.trim() !== '');
+  if (!rawLines.length) return [];
+
+  // A header row ("GERK  Ha  FMS  Sample no") has a non-numeric Ha
+  // (2nd) cell — drop it rather than choke on it as a bogus GERK entry.
+  let lines = rawLines;
+  const firstHa = (lines[0].split('\t')[1] || '').trim();
+  if (firstHa && !/^\d+([.,]\d+)?$/.test(firstHa)) lines = lines.slice(1);
+
+  // 4+ tab-separated cells on any row means this is the lab's GERK +
+  // segment sheet, not a plain code (+ha) list.
+  const isSegmentPaste = lines.some(l => l.split('\t').length >= 4);
+
+  if (isSegmentPaste) {
+    // GERK/Ha/FMS are blank on every row but a group's first (merged-cell
+    // style paste) — carry the last-seen value forward. Sample no is
+    // the only cell that's always present. Cell 5 (optional) is the
+    // lab's pooling instruction — "združi 1", "ne pobereš"... —
+    // normalized to match SAMPLE_ACTIONS exactly.
+    const codesInOrder = [];
+    const segmentsByCode = new Map();
+    const haByCode = new Map();
+    let lastCode = null, lastFms = null;
+    for (const line of lines) {
+      const cells = line.split('\t');
+      const code = (cells[0] || '').trim();
+      const ha   = (cells[1] || '').trim();
+      const fms  = (cells[2] || '').trim();
+      const sampleNo = (cells[3] || '').trim();
+      const vzorcenje = normalizeZdruzi((cells[4] || '').trim());
+      if (!sampleNo) continue;
+      if (code) { lastCode = code; if (ha) haByCode.set(code, ha); }
+      if (fms)  lastFms  = fms;
+      if (!lastCode) continue;
+      if (!segmentsByCode.has(lastCode)) { segmentsByCode.set(lastCode, []); codesInOrder.push(lastCode); }
+      segmentsByCode.get(lastCode).push({ fms: lastFms || null, sampleNo, vzorcenje });
+    }
+    return codesInOrder.map(code => ({
+      code,
+      hectares: haByCode.get(code) ? haByCode.get(code).replace(',', '.') : null,
+      segments: segmentsByCode.get(code),
+    }));
+  }
+
+  // Plain code list (comma/semicolon-separated, or one code[+ha] per line).
+  const entries = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (line.includes('\t')) {
+      const [code, hectares] = line.split('\t').map(s => s.trim());
+      // Slovenian Excel exports use a comma decimal separator, but
+      // <input type="number"> only accepts a period — silently rejects
+      // "2,5" otherwise, leaving the field empty with no explanation.
+      if (code) entries.push({ code, hectares: hectares ? hectares.replace(',', '.') : null, segments: null });
+    } else {
+      line.split(/[,;]/).map(s => s.trim()).filter(Boolean)
+        .forEach(code => entries.push({ code, hectares: null, segments: null }));
+    }
+  }
+  return entries;
+}
+
 function getFormGerks(container = woGerksListEl) {
   return Array.from(container.querySelectorAll('.gerk-row')).map(row => ({
     code:     row.querySelector('.gerk-code-input').value.trim(),
@@ -1010,8 +1096,17 @@ function renderSampleDepthCell(s) {
 // a direct .update(), since regular users have no RLS UPDATE policy
 // on delovni_nalogi_vzorci at all otherwise — see
 // migration_update_sample_comment_rpc.sql.
+// "Don't collect this one" markers from the lab/field — flagged
+// visually (red) so it isn't missed while scanning a long segment list.
+function isNoCollectComment(comment) {
+  if (!comment) return false;
+  const norm = comment.trim().toLowerCase();
+  return norm === 'ne' || norm === 'ne pobereš' || norm === 'ne poberes';
+}
+
 function renderSampleCommentCell(s) {
-  return `<input type="text" class="sample-field-input wlg-comment-input" data-sample-id="${escHtml(s.id)}" value="${escHtml(s.comment || '')}" maxlength="200">`;
+  const flagClass = isNoCollectComment(s.comment) ? ' wlg-comment-input--flagged' : '';
+  return `<input type="text" class="sample-field-input wlg-comment-input${flagClass}" data-sample-id="${escHtml(s.id)}" value="${escHtml(s.comment || '')}" maxlength="200">`;
 }
 
 
@@ -1225,9 +1320,11 @@ function renderSamplesSection(samples, gerkId) {
               <button type="button" class="btn btn-secondary btn-sm" data-action="wlg-add-sample-cancel">Prekliči</button>
             </div>
           </div>` : '';
+  const hasFlagged = samples.some(s => isNoCollectComment(s.comment));
   return `
         <button type="button" class="wlg-samples-toggle" data-action="wlg-samples-toggle">
           <span>${samples.length} ${samples.length === 1 ? 'segment' : 'segmentov'}</span>
+          ${hasFlagged ? '<span class="wlg-sample-flag-dot" title="Vsaj en segment ima opombo »ne poberi«" aria-hidden="true"></span>' : ''}
           <span class="wlg-samples-chevron" aria-hidden="true">▾</span>
         </button>
         <div class="wlg-samples-panel" hidden>
@@ -1235,7 +1332,7 @@ function renderSamplesSection(samples, gerkId) {
             <thead><tr><th>Št. segmenta</th><th>Vzorčenje</th><th>Globina</th><th>Opomba</th>${isAdminView() ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${samples.map(s => `
-                <tr>
+                <tr class="${isNoCollectComment(s.comment) ? 'wlg-sample-row--flagged' : ''}">
                   <td>${renderSampleNoCell(s)}</td>
                   <td>${renderSamplingCell(s)}</td>
                   <td>${renderSampleDepthCell(s)}</td>
@@ -1290,13 +1387,12 @@ function updateOrderHeader() {
   }
 
   woImportZonesWrap.hidden = !isAdmin;
-  // Manual "+ Dodaj GERK" — the handler and datalist were always wired
-  // (loadCustomerGerkDatalist() in openWorkOrderDetail()), this wrapper
-  // was just never un-hidden, so KML import was the only way in. Works
-  // regardless of status (Plan/V delu/Izvedeno) — see
-  // migration_sync_status_on_gerk_assignment.sql for why adding a GERK
-  // to an "Izvedeno" order now correctly drops it back to "V delu".
+  // Manual "+ Dodaj GERK-e" — works regardless of status (Plan/V delu/
+  // Izvedeno) — see migration_sync_status_on_gerk_assignment.sql for why
+  // adding a GERK to an "Izvedeno" order now correctly drops it back to
+  // "V delu".
   woAddExistingGerkWrap.hidden = !isAdmin;
+  woExportSamplingWrap.hidden  = !isAdmin;
 
   // Delete (archive) / restore — mutually exclusive on deleted_at, admin-only.
   const isDeleted = !!wo.deleted_at;
@@ -1357,8 +1453,7 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   workLogDateInput.title = currentDetailPlanIsHeaderDate ? 'Planirano (datum iz koledarja Planiranje)' : '';
   setWorkLogDate(currentDetailDate);
 
-  woAddExistingGerkCode.value = '';
-  if (isAdminView()) loadCustomerGerkDatalist(workOrder.stranka_id); // fire-and-forget
+  woAddExistingGerkPaste.value = '';
   if (isAdminView()) loadPlanDateForDetail(workOrder.id, planId); // fire-and-forget, re-renders the header itself once resolved
   if (isAdminView()) loadIzvajalecEditOptions(); // fire-and-forget, same — see below
 
@@ -2691,6 +2786,401 @@ function exportSelectedGerksToKml(btn) {
   showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'oblika' : 'oblik'} v KML.` + (skipped.length ? ` Brez geometrije: ${skipped.join(', ')}.` : ''));
 }
 
+// ── Export sampling zones to a NextFarm-compatible shapefile ─────
+// NextFarm (the soil-sampling app the lab's own reports are built from)
+// exports a per-customer shapefile where each row is one sampling zone —
+// not one GERK — carrying a sample number (PROBENUMME) and area, plus a
+// full set of lab-chemistry columns that ship blank until the lab sends
+// results back. Reproducing that exact schema (field names/widths/
+// decimals byte-for-byte, verified against a real NextFarm export) lets
+// this file be handed straight to the lab/NextFarm instead of re-typed.
+// Coordinates are reprojected from this app's native WGS84 lon/lat to
+// UTM 33N meters (matches NextFarm's own export) — the projection formula
+// was verified against real paired WGS84/UTM33N coordinates for the same
+// sampling zone to within 16cm.
+
+function wgs84ToUtm33N(lon, lat) {
+  const a = 6378137.0, f = 1 / 298.257223563, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const k0 = 0.9996, lon0 = 15 * Math.PI / 180, FE = 500000, FN = 0;
+  const phi = lat * Math.PI / 180, lambda = lon * Math.PI / 180;
+  const N = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2);
+  const T = Math.tan(phi) ** 2, C = ep2 * Math.cos(phi) ** 2, A = (lambda - lon0) * Math.cos(phi);
+  const M = a * (
+    (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256) * phi
+    - (3*e2/8 + 3*e2**2/32 + 45*e2**3/1024) * Math.sin(2*phi)
+    + (15*e2**2/256 + 45*e2**3/1024) * Math.sin(4*phi)
+    - (35*e2**3/3072) * Math.sin(6*phi)
+  );
+  const x = FE + k0*N*(A + (1-T+C)*A**3/6 + (5-18*T+T**2+72*C-58*ep2)*A**5/120);
+  const y = FN + k0*(M + N*Math.tan(phi)*(A**2/2 + (5-T+9*C+4*C**2)*A**4/24 + (61-58*T+T**2+600*C-330*ep2)*A**6/720));
+  return [x, y];
+}
+
+const NF_PRJ_WKT = 'PROJCS["MYCUSTOM_TGIS_CSProjectedCoordinateSystem_GeoPROJ_SYS_32633_9807_7006945_8901_9001",GEOGCS["MYCUSTOM_TGIS_CSGeographicCoordinateSystem_GeoSYS_7006945_8901",DATUM["MYCUSTOM_TGIS_CSDatum_WGS84",SPHEROID["WGS_1984",6378137,298.257223563],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator",AUTHORITY["EPSG","9807"]],PARAMETER["Central_Meridian",15],PARAMETER["Latitude_Of_Origin",0],PARAMETER["False_Easting",500000],PARAMETER["False_Northing",0],PARAMETER["Scale_Factor",0.9996],UNIT["Meter",1,AUTHORITY["EPSG","9001"]]]';
+
+// ESRI shapefiles want exterior rings clockwise, holes counter-clockwise
+// — the opposite of GeoJSON's own convention — so flip whichever rings
+// don't already match before writing.
+function nfShoelaceSignedArea(ring) {
+  let s = 0;
+  for (let i = 0; i < ring.length - 1; i++) s += ring[i][0]*ring[i+1][1] - ring[i+1][0]*ring[i][1];
+  return s / 2;
+}
+function nfEnsureWinding(ring, wantClockwise) {
+  const isClockwise = nfShoelaceSignedArea(ring) < 0;
+  return isClockwise === wantClockwise ? ring : ring.slice().reverse();
+}
+function nfPolygonAreaHa(rings) { // rings already projected to UTM meters
+  if (!rings.length) return 0;
+  const outer = Math.abs(nfShoelaceSignedArea(rings[0]));
+  const holes = rings.slice(1).reduce((s, r) => s + Math.abs(nfShoelaceSignedArea(r)), 0);
+  return (outer - holes) / 10000;
+}
+
+// features: [{ rings: [[[x,y],...], ...] }], rings[0] exterior, rest holes
+function nfBuildShpShx(features) {
+  const recordBlobs = features.map(f => {
+    const rings = f.rings.map((ring, ri) => nfEnsureWinding(ring, ri === 0));
+    let numPoints = 0;
+    const parts = [];
+    for (const ring of rings) { parts.push(numPoints); numPoints += ring.length; }
+    const contentLenBytes = 4 + 32 + 4 + 4 + parts.length * 4 + numPoints * 16;
+    const dv = new DataView(new ArrayBuffer(contentLenBytes));
+    let o = 0;
+    dv.setInt32(o, 5, true); o += 4; // shape type: Polygon
+    let xmin=Infinity, ymin=Infinity, xmax=-Infinity, ymax=-Infinity;
+    for (const ring of rings) for (const [x,y] of ring) { if(x<xmin)xmin=x; if(x>xmax)xmax=x; if(y<ymin)ymin=y; if(y>ymax)ymax=y; }
+    dv.setFloat64(o, xmin, true); o += 8;
+    dv.setFloat64(o, ymin, true); o += 8;
+    dv.setFloat64(o, xmax, true); o += 8;
+    dv.setFloat64(o, ymax, true); o += 8;
+    dv.setInt32(o, parts.length, true); o += 4;
+    dv.setInt32(o, numPoints, true); o += 4;
+    for (const p of parts) { dv.setInt32(o, p, true); o += 4; }
+    for (const ring of rings) for (const [x,y] of ring) { dv.setFloat64(o, x, true); o += 8; dv.setFloat64(o, y, true); o += 8; }
+    return new Uint8Array(dv.buffer);
+  });
+
+  let fileXmin=Infinity, fileYmin=Infinity, fileXmax=-Infinity, fileYmax=-Infinity;
+  for (const f of features) for (const ring of f.rings) for (const [x,y] of ring) {
+    if(x<fileXmin)fileXmin=x; if(x>fileXmax)fileXmax=x; if(y<fileYmin)fileYmin=y; if(y>fileYmax)fileYmax=y;
+  }
+
+  const shpRecordsTotalBytes = recordBlobs.reduce((s, b) => s + 8 + b.length, 0);
+  const shpTotalBytes = 100 + shpRecordsTotalBytes;
+  const shp = new Uint8Array(shpTotalBytes);
+  const shpDv = new DataView(shp.buffer);
+  const shx = new Uint8Array(100 + recordBlobs.length * 8);
+  const shxDv = new DataView(shx.buffer);
+  for (const [dv, totalLen] of [[shpDv, shpTotalBytes], [shxDv, shx.length]]) {
+    dv.setInt32(0, 9994, false);
+    dv.setInt32(24, totalLen / 2, false);
+    dv.setInt32(28, 1000, true);
+    dv.setInt32(32, 5, true);
+    dv.setFloat64(36, fileXmin, true);
+    dv.setFloat64(44, fileYmin, true);
+    dv.setFloat64(52, fileXmax, true);
+    dv.setFloat64(60, fileYmax, true);
+  }
+
+  let shpOffset = 100;
+  recordBlobs.forEach((blob, i) => {
+    shpDv.setInt32(shpOffset, i + 1, false);
+    shpDv.setInt32(shpOffset + 4, blob.length / 2, false);
+    shp.set(blob, shpOffset + 8);
+    shxDv.setInt32(100 + i * 8, shpOffset / 2, false);
+    shxDv.setInt32(100 + i * 8 + 4, blob.length / 2, false);
+    shpOffset += 8 + blob.length;
+  });
+
+  return { shp, shx };
+}
+
+function nfDbfField(name, type, length, decimals = 0) { return { name, type, length, decimals }; }
+
+function nfBuildDbf(fields, rows) {
+  const enc = new TextEncoder();
+  const recordLen = 1 + fields.reduce((s, f) => s + f.length, 0);
+  const headerLen = 32 + fields.length * 32 + 1;
+  const now = new Date();
+  const bytes = new Uint8Array(headerLen + recordLen * rows.length + 1);
+  const dv = new DataView(bytes.buffer);
+
+  bytes[0] = 3; // dBase III, no memo
+  bytes[1] = now.getFullYear() - 1900;
+  bytes[2] = now.getMonth() + 1;
+  bytes[3] = now.getDate();
+  dv.setUint32(4, rows.length, true);
+  dv.setUint16(8, headerLen, true);
+  dv.setUint16(10, recordLen, true);
+
+  let o = 32;
+  for (const f of fields) {
+    bytes.set(enc.encode(f.name.slice(0, 10)), o);
+    bytes[o + 11] = f.type.charCodeAt(0);
+    bytes[o + 16] = f.length;
+    bytes[o + 17] = f.decimals;
+    o += 32;
+  }
+  bytes[o] = 0x0d; o += 1;
+
+  for (const row of rows) {
+    bytes[o] = 0x20; // not deleted
+    let fo = o + 1;
+    for (const f of fields) {
+      const val = row[f.name];
+      let str;
+      if (f.type === 'N') {
+        const num = (val === null || val === undefined || val === '') ? 0 : Number(val);
+        str = num.toFixed(f.decimals).padStart(f.length, ' ').slice(-f.length);
+      } else {
+        str = ((val === null || val === undefined) ? '' : String(val)).slice(0, f.length).padEnd(f.length, ' ');
+      }
+      const strBytes = enc.encode(str).slice(0, f.length);
+      bytes.set(strBytes, fo);
+      if (strBytes.length < f.length) bytes.fill(0x20, fo + strBytes.length, fo + f.length);
+      fo += f.length;
+    }
+    o += recordLen;
+  }
+  bytes[o] = 0x1a; // EOF marker
+  return bytes;
+}
+
+const NF_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function nfCrc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = NF_CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function nfBuildZip(entries) { // [{ name, data: Uint8Array }]
+  const enc = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const nameBytes = enc.encode(entry.name);
+    const crc = nfCrc32(entry.data);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, entry.data.length, true);
+    local.setUint32(22, entry.data.length, true);
+    local.setUint16(26, nameBytes.length, true);
+    localParts.push(new Uint8Array(local.buffer), nameBytes, entry.data);
+
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(4, 20, true);
+    central.setUint16(6, 20, true);
+    central.setUint32(16, crc, true);
+    central.setUint32(20, entry.data.length, true);
+    central.setUint32(24, entry.data.length, true);
+    central.setUint16(28, nameBytes.length, true);
+    central.setUint32(42, offset, true);
+    centralParts.push(new Uint8Array(central.buffer), nameBytes);
+
+    offset += 30 + nameBytes.length + entry.data.length;
+  }
+
+  const centralStart = offset;
+  const centralSize = centralParts.reduce((s, p) => s + p.length, 0);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(8, entries.length, true);
+  eocd.setUint16(10, entries.length, true);
+  eocd.setUint32(12, centralSize, true);
+  eocd.setUint32(16, centralStart, true);
+
+  const out = new Uint8Array(offset + centralSize + 22);
+  let p = 0;
+  for (const part of [...localParts, ...centralParts]) { out.set(part, p); p += part.length; }
+  out.set(new Uint8Array(eocd.buffer), p);
+  return out;
+}
+
+const NF_DBF_FIELDS = [
+  nfDbfField('ID', 'C', 5), nfDbfField('SCHLAGNUMM', 'C', 30), nfDbfField('SCHLAGNAME', 'C', 30),
+  nfDbfField('KUNDE', 'C', 10), nfDbfField('NUTZART', 'C', 10), nfDbfField('PROBEDATUM', 'C', 20),
+  nfDbfField('PROBENUMME', 'C', 30), nfDbfField('FEIN', 'N', 10, 8), nfDbfField('HUMUS', 'N', 10, 8),
+  nfDbfField('BODENART', 'C', 10), nfDbfField('LABORPRNR', 'C', 30), nfDbfField('HUMUS_NGES', 'N', 10, 8),
+  nfDbfField('HUMUS_CN', 'N', 10, 8), nfDbfField('FLAECHE_HA', 'N', 10, 8), nfDbfField('ANALYSEINF', 'C', 100),
+  nfDbfField('P_WERT', 'N', 10, 8), nfDbfField('P_VS', 'C', 10), nfDbfField('P_EMPFEHLU', 'N', 10, 8),
+  nfDbfField('K_WERT', 'N', 10, 8), nfDbfField('K_VS', 'C', 10), nfDbfField('K_EMPFEHLU', 'N', 10, 8),
+  nfDbfField('MG_WERT', 'N', 10, 8), nfDbfField('MG_VS', 'C', 10), nfDbfField('MG_EMPFEHL', 'N', 10, 8),
+  nfDbfField('PH_WERT', 'N', 10, 8), nfDbfField('PH_VS', 'C', 10), nfDbfField('PH_EMPFEHL', 'N', 10, 8),
+  nfDbfField('B_WERT', 'N', 10, 8), nfDbfField('B_VS', 'C', 10), nfDbfField('B_EMPFEHLU', 'N', 10, 8),
+  nfDbfField('CU_WERT', 'N', 10, 8), nfDbfField('CU_VS', 'C', 10), nfDbfField('CU_EMPFEHL', 'N', 10, 8),
+  nfDbfField('MN_WERT', 'N', 10, 8), nfDbfField('MN_VS', 'C', 10), nfDbfField('MN_EMPFEHL', 'N', 10, 8),
+  nfDbfField('MO_WERT', 'N', 10, 8), nfDbfField('MO_VS', 'C', 10), nfDbfField('MO_EMPFEHL', 'N', 10, 8),
+  nfDbfField('ZN_WERT', 'N', 10, 8), nfDbfField('ZN_VS', 'C', 10), nfDbfField('ZN_EMPFEHL', 'N', 10, 8),
+  nfDbfField('S_WERT', 'N', 10, 8), nfDbfField('S_VS', 'C', 10), nfDbfField('S_EMPFEHLU', 'N', 10, 8),
+];
+
+function fmtDateSlashes(isoDate) { // 'YYYY-MM-DD' -> 'DD/MM/YYYY'
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function geojsonRingsLonLat(geojson) {
+  if (!geojson) return [];
+  if (geojson.type === 'Polygon') return geojson.coordinates;
+  if (geojson.type === 'MultiPolygon') return geojson.coordinates.flat();
+  return [];
+}
+
+// A zone's sample_no (segment_label) is only unique within the order, not
+// tied to a specific compound sub-code — matched by value across every
+// GERK line's sample list, same as the rest of this file treats sample
+// numbers.
+function findVzorecForZone(seg) {
+  for (const g of (currentDetailWorkOrder?.delovni_nalogi_gerki || [])) {
+    const match = (g.delovni_nalogi_vzorci || []).find(s => s.sample_no === seg.segment_label);
+    if (match) return match;
+  }
+  return null;
+}
+
+function zoneAreaHa(seg, projectedRings) {
+  const vzorec = findVzorecForZone(seg);
+  if (vzorec?.area_ha != null) return Number(vzorec.area_ha);
+  const rings = projectedRings || geojsonRingsLonLat(seg.segment_geojson).map(ring => ring.map(([lon, lat]) => wgs84ToUtm33N(lon, lat)));
+  return nfPolygonAreaHa(rings);
+}
+
+function openExportSamplingModal() {
+  if (!currentDetailWorkOrder) return;
+  exportSamplingErrorEl.hidden = true;
+  exportSamplingNote.hidden = true;
+
+  const byCode = new Map();
+  for (const seg of currentGerkSegments) {
+    if (!seg.segment_geojson) continue;
+    if (!byCode.has(seg.gerk_code)) byCode.set(seg.gerk_code, []);
+    byCode.get(seg.gerk_code).push(seg);
+  }
+
+  const gerkLines = currentDetailWorkOrder.delovni_nalogi_gerki || [];
+  // get_work_order_gerk_segments tags every zone with the order LINE's own
+  // gerk_code (sg.full_code in that RPC — even for a compound "A+B+C" line,
+  // it doesn't expose which real sub-GERK a zone belongs to), so this
+  // already matches delovni_nalogi_gerki.gerk_code / work_log_gerks.gerk_code
+  // directly — no split/rejoin needed, unlike the per-real-sub-GERK
+  // treatment used for ARKOD shapes and the KML export elsewhere.
+  const rows = [...byCode.entries()].map(([code, zones]) => {
+    const completed = currentAllGerkEntries.some(e => e.gerk_code === code && e.completed);
+    const ha = zones.reduce((s, z) => s + zoneAreaHa(z), 0);
+    return { code, zones, completed, ha };
+  }).sort((a, b) => a.code.localeCompare(b.code, 'sl'));
+
+  const skippedCodes = gerkLines.map(g => g.gerk_code).filter(code => !byCode.has(code));
+
+  exportSamplingList.innerHTML = rows.map(r => `
+    <label class="wo-gerk-check-item">
+      <input type="checkbox" class="export-sampling-cb" value="${escHtml(r.code)}">
+      <span class="wo-gerk-check-code">${escHtml(r.code)}</span>
+      <span class="wo-gerk-check-name">${r.zones.length} ${r.zones.length === 1 ? 'cona' : 'con'} · ${r.ha.toFixed(2)} ha</span>
+      <span class="wo-status-badge ${r.completed ? 'wo-status--izvedeno' : 'wo-status--plan'}">${r.completed ? 'Izvedeno' : 'Ni izvedeno'}</span>
+    </label>`).join('');
+
+  exportSamplingList.querySelectorAll('.export-sampling-cb').forEach(cb => cb.addEventListener('change', syncExportSamplingSelectAllCb));
+  syncExportSamplingSelectAllCb();
+
+  if (!rows.length) {
+    exportSamplingNote.textContent = 'Noben GERK na tem nalogu nima uvoženih con vzorčenja.';
+    exportSamplingNote.hidden = false;
+  } else if (skippedCodes.length) {
+    exportSamplingNote.textContent = `Brez con (ni v seznamu): ${skippedCodes.join(', ')}.`;
+    exportSamplingNote.hidden = false;
+  }
+
+  showModalAnimated(exportSamplingModal);
+}
+
+function closeExportSamplingModal() {
+  hideModalAnimated(exportSamplingModal);
+}
+
+function syncExportSamplingSelectAllCb() {
+  const cbs = [...exportSamplingList.querySelectorAll('.export-sampling-cb')];
+  const checked = cbs.filter(cb => cb.checked).length;
+  exportSamplingSelectAllCb.checked = cbs.length > 0 && checked === cbs.length;
+  exportSamplingSelectAllCb.indeterminate = checked > 0 && checked < cbs.length;
+}
+
+function showExportSamplingError(msg) {
+  exportSamplingErrorEl.textContent = msg;
+  exportSamplingErrorEl.hidden = false;
+}
+
+function confirmExportSampling() {
+  const codes = [...exportSamplingList.querySelectorAll('.export-sampling-cb:checked')].map(cb => cb.value);
+  if (!codes.length) { showExportSamplingError('Izberite vsaj en GERK.'); return; }
+  exportSamplingErrorEl.hidden = true;
+
+  const customerName = (currentDetailWorkOrder.customers?.naziv || currentDetailWorkOrder.customers?.company_name || '').trim();
+  const zones = currentGerkSegments
+    .filter(seg => codes.includes(seg.gerk_code) && seg.segment_geojson)
+    .sort((a, b) => a.gerk_code.localeCompare(b.gerk_code, 'sl') || (a.segment_label || '').localeCompare(b.segment_label || '', 'sl'));
+
+  const features = [];
+  const rows = [];
+  let id = 1;
+  for (const seg of zones) {
+    const rings = geojsonRingsLonLat(seg.segment_geojson).map(ring => ring.map(([lon, lat]) => wgs84ToUtm33N(lon, lat)));
+    if (!rings.length) continue;
+    features.push({ rings });
+
+    const vzorec = findVzorecForZone(seg);
+    rows.push({
+      ID: String(id++),
+      SCHLAGNAME: `${seg.gerk_code} ${customerName}`.trim(),
+      PROBEDATUM: fmtDateSlashes(vzorec?.sampling_date),
+      PROBENUMME: seg.segment_label || '',
+      FLAECHE_HA: zoneAreaHa(seg, rings),
+    });
+  }
+
+  if (!features.length) { showExportSamplingError('Izbrani GERK-i nimajo geometrije za izvoz.'); return; }
+
+  const { shp, shx } = nfBuildShpShx(features);
+  const dbf = nfBuildDbf(NF_DBF_FIELDS, rows);
+  const prj = new TextEncoder().encode(NF_PRJ_WKT);
+  const baseName = `${(currentDetailWorkOrder.stevilka || 'vzorcenje').replace(/[^\w.-]+/g, '_')}_vzorcenje`;
+  const zip = nfBuildZip([
+    { name: `${baseName}.shp`, data: shp },
+    { name: `${baseName}.shx`, data: shx },
+    { name: `${baseName}.dbf`, data: dbf },
+    { name: `${baseName}.prj`, data: prj },
+  ]);
+
+  downloadTextFile(`${baseName}.zip`, zip, 'application/zip');
+  closeExportSamplingModal();
+  showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'cona' : 'con'} vzorčenja.`);
+}
+
+woExportSamplingBtn.addEventListener('click', openExportSamplingModal);
+exportSamplingModalClose.addEventListener('click', closeExportSamplingModal);
+exportSamplingCancelBtn.addEventListener('click', closeExportSamplingModal);
+exportSamplingModal.addEventListener('click', e => { if (e.target === exportSamplingModal) closeExportSamplingModal(); });
+exportSamplingSelectAllCb.addEventListener('change', () => {
+  exportSamplingList.querySelectorAll('.export-sampling-cb').forEach(cb => { cb.checked = exportSamplingSelectAllCb.checked; });
+  exportSamplingSelectAllCb.indeterminate = false;
+});
+exportSamplingConfirmBtn.addEventListener('click', confirmExportSampling);
+
 async function updateSampleNo(inputEl) {
   const sampleId = inputEl.dataset.sampleId;
   const value = inputEl.value.trim();
@@ -2730,6 +3220,22 @@ async function updateSampleComment(inputEl) {
     const { error } = await supabase.rpc('update_sample_comment', { p_sample_id: sampleId, p_comment: value || null });
     if (error) throw error;
     if (sample) sample.comment = value || null;
+
+    // Red flag updates live — no full re-render on every keystroke-save,
+    // so this input/row/toggle-dot are patched directly instead of
+    // waiting for the next loadDetailForDate().
+    const flagged = isNoCollectComment(value);
+    inputEl.classList.toggle('wlg-comment-input--flagged', flagged);
+    inputEl.closest('tr')?.classList.toggle('wlg-sample-row--flagged', flagged);
+    const wlgRow = inputEl.closest('.wlg-row');
+    const toggleBtn = wlgRow?.querySelector('.wlg-samples-toggle');
+    if (toggleBtn && !toggleBtn.querySelector('.wlg-sample-flag-dot')) {
+      const anyFlagged = Array.from(wlgRow.querySelectorAll('.wlg-comment-input')).some(el => el.classList.contains('wlg-comment-input--flagged'));
+      if (anyFlagged) toggleBtn.querySelector('.wlg-samples-chevron').insertAdjacentHTML('beforebegin', '<span class="wlg-sample-flag-dot" title="Vsaj en segment ima opombo »ne poberi«" aria-hidden="true"></span>');
+    } else if (toggleBtn && !flagged) {
+      const anyFlagged = Array.from(wlgRow.querySelectorAll('.wlg-comment-input')).some(el => el.classList.contains('wlg-comment-input--flagged'));
+      if (!anyFlagged) toggleBtn.querySelector('.wlg-sample-flag-dot')?.remove();
+    }
   } catch (e) {
     showFormError(e.message || 'Napaka pri shranjevanju.');
     if (sample) inputEl.value = sample.comment || '';
@@ -3332,52 +3838,85 @@ woRestoreBtn.addEventListener('click', async () => {
   await loadWorkOrders();
 });
 
-// Customer-scoped suggestions for the "add GERK to existing order"
-// datalist — same customer this work order already belongs to.
-async function loadCustomerGerkDatalist(customerId) {
-  if (!customerId) { woExistingGerkList.innerHTML = ''; return; }
-  const { data } = await supabase.from('fields').select('cadastre_id, name').eq('customer_id', customerId).order('name');
-  woExistingGerkList.innerHTML = (data || [])
-    .map(f => `<option value="${escHtml(f.cadastre_id)}">${escHtml(f.name || '')}</option>`)
-    .join('');
-}
-
+// Manual "add GERK(s)" on an already-saved order — same paste component
+// and parsing (parseGerkPasteText) as the create-order form, just
+// applied as direct DB inserts instead of in-memory rows: a plain code
+// list adds bare GERK lines, the lab's GERK/Ha/FMS/Sample no sheet also
+// creates each line's delovni_nalogi_vzorci rows in the same action, so
+// a manually-added GERK's segments get a real sample number exactly
+// like a KML-imported one does — not a separate step with nothing to
+// show afterward.
 woAddExistingGerkBtn.addEventListener('click', async () => {
-  const code = woAddExistingGerkCode.value.trim();
-  if (!code) return;
-  const known = (await supabase.from('fields').select('id, area_ha').eq('customer_id', currentDetailWorkOrder.stranka_id).eq('cadastre_id', code).maybeSingle()).data;
-  // No format requirement beyond non-empty — a real GERK code is a
-  // 7-digit number, but plenty of fields are only known by a common
-  // name (not in the official registry at all), so a plain string is
-  // valid too. Just won't have a known field to pull area/field_id from.
+  const entries = parseGerkPasteText(woAddExistingGerkPaste.value);
+  if (!entries.length) return;
 
   woAddExistingGerkBtn.disabled = true;
-  // field_id left out of the insert, backfilled best-effort after —
-  // same reasoning as the create-order flow (see its comment): this
-  // column's schema-cache entry has been unreliable, and nothing
-  // currently reads it.
-  const { data, error } = await supabase
-    .from('delovni_nalogi_gerki')
-    .insert({
-      delovni_nalog_id: currentDetailWorkOrder.id,
-      gerk_code:        code,
-      kolicina_ha:      known?.area_ha ?? null,
-    })
-    .select('id, gerk_code, kolicina_ha, lokacija, tip_lab_analize')
-    .single();
-  woAddExistingGerkBtn.disabled = false;
-  if (error) return showFormError(error.message || 'Napaka pri dodajanju GERKA.');
+  try {
+    const codes = entries.map(e => e.code);
+    const { data: knownFields } = await supabase
+      .from('fields')
+      .select('id, cadastre_id, area_ha')
+      .eq('customer_id', currentDetailWorkOrder.stranka_id)
+      .in('cadastre_id', codes);
+    const knownByCode = new Map((knownFields || []).map(f => [f.cadastre_id, f]));
 
-  if (known?.id) {
-    const { error: fieldIdError } = await supabase.from('delovni_nalogi_gerki').update({ field_id: known.id }).eq('id', data.id);
-    if (fieldIdError) console.warn('field_id backfill failed for', code, fieldIdError);
+    // field_id left out of the insert, backfilled best-effort after —
+    // same reasoning as the create-order flow (see its comment): this
+    // column's schema-cache entry has been unreliable, and nothing
+    // currently reads it.
+    const { data: insertedRows, error } = await supabase
+      .from('delovni_nalogi_gerki')
+      .insert(entries.map(({ code, hectares }) => ({
+        delovni_nalog_id: currentDetailWorkOrder.id,
+        gerk_code:        code,
+        kolicina_ha:      knownByCode.get(code)?.area_ha ?? (hectares ? parseFloat(hectares) : null),
+      })))
+      .select('id, gerk_code, kolicina_ha, lokacija, tip_lab_analize');
+    if (error) throw error;
+
+    await Promise.all(insertedRows.map(row => {
+      const known = knownByCode.get(row.gerk_code);
+      return known?.id
+        ? supabase.from('delovni_nalogi_gerki').update({ field_id: known.id }).eq('id', row.id)
+        : Promise.resolve();
+    }));
+
+    // Segment-sheet paste also carries sample rows per code — insert
+    // them against the GERK line id each code just got back.
+    const segmentRows = [];
+    for (const row of insertedRows) {
+      const entry = entries.find(e => e.code === row.gerk_code);
+      for (const s of (entry?.segments || [])) {
+        segmentRows.push({ delovni_nalog_gerk_id: row.id, sample_no: s.sampleNo, sampling_note: s.vzorcenje || null });
+      }
+    }
+    let insertedSamples = [];
+    if (segmentRows.length) {
+      const { data, error: segError } = await supabase
+        .from('delovni_nalogi_vzorci')
+        .insert(segmentRows)
+        .select('id, delovni_nalog_gerk_id, sample_no, sampling_date, sending_date, sampling_note, sending_note, sampling_depth_cm, area_ha, comment');
+      if (segError) throw segError;
+      insertedSamples = data || [];
+    }
+
+    currentDetailWorkOrder.delovni_nalogi_gerki = [
+      ...(currentDetailWorkOrder.delovni_nalogi_gerki || []),
+      ...insertedRows.map(row => ({ ...row, delovni_nalogi_vzorci: insertedSamples.filter(s => s.delovni_nalog_gerk_id === row.id) })),
+    ];
+    woAddExistingGerkPaste.value = '';
+    await loadDetailForDate();
+    await loadWorkOrders();
+    await showWoDetailMap(currentDetailWorkOrder);
+  } catch (e) {
+    // 23505 = unique_violation on (delovni_nalog_gerk_id, sample_no) —
+    // same constraint as addSample/updateSampleNo.
+    showFormError(e.code === '23505'
+      ? 'Ta št. segmenta je znotraj GERK-a že v uporabi.'
+      : (e.message || 'Napaka pri dodajanju GERK-ov.'));
+  } finally {
+    woAddExistingGerkBtn.disabled = false;
   }
-
-  currentDetailWorkOrder.delovni_nalogi_gerki = [...(currentDetailWorkOrder.delovni_nalogi_gerki || []), { ...data, delovni_nalogi_vzorci: [] }];
-  woAddExistingGerkCode.value = '';
-  await loadDetailForDate();
-  await loadWorkOrders();
-  await showWoDetailMap(currentDetailWorkOrder);
 });
 
 logoutBtn.addEventListener('click', async () => {
@@ -5412,92 +5951,17 @@ woNewImportZonesCancelBtn.addEventListener('click', cancelNewKmlImport);
 woNewImportZonesConfirmBtn.addEventListener('click', () => confirmNewKmlImport(woNewImportZonesConfirmBtn));
 
 woGerkPasteBtn.addEventListener('click', () => {
-  // Don't trim whole lines here — a continuation row copied out of a
-  // lab's 4-column sheet ("GERK/Ha/FMS/Sample no") is literally
-  // "\t\t\t11722" (blank GERK/Ha/FMS, only the sample number), and
-  // trimming would eat those leading tabs and destroy which column
-  // the "11722" actually came from.
-  const rawLines = woGerkPasteInput.value.split('\n').filter(l => l.trim() !== '');
-  if (!rawLines.length) return;
-
-  // A header row ("GERK  Ha  FMS  Sample no") has a non-numeric Ha
-  // (2nd) cell — drop it rather than choke on it as a bogus GERK entry.
-  // Checking the Ha cell instead of the GERK code itself matters now
-  // that GERK codes aren't always purely numeric (e.g. "1526437_CH1"
-  // sub-field codes) — the first real data row would otherwise get
-  // misread as a header and silently dropped.
-  let lines = rawLines;
-  const firstHa = (lines[0].split('\t')[1] || '').trim();
-  if (firstHa && !/^\d+([.,]\d+)?$/.test(firstHa)) lines = lines.slice(1);
-
-  // 4+ tab-separated cells on any row means this is the lab's GERK +
-  // segment sheet, not a plain code (+ha) list — handle the whole
-  // paste as one batch of segments rather than per-line codes.
-  const isSegmentPaste = lines.some(l => l.split('\t').length >= 4);
-
-  if (isSegmentPaste) {
-    // GERK/Ha/FMS are blank on every row but a group's first (merged-cell
-    // style paste) — carry the last-seen value forward. Sample no is
-    // the only cell that's always present. Ha is only used as a fallback
-    // — the known field's own area (if any) still wins, since that's
-    // the authoritative value once a field exists; the pasted Ha only
-    // matters for a field that's unknown, or known but missing an area.
-    // Cell 5 (optional) is the lab's pooling instruction — "združi 1",
-    // "združi 2"... or "ne pobereš" — normalized to match SAMPLE_ACTIONS
-    // exactly (underscore, not space) so it lands pre-selected in the
-    // segment's Vzorčenje dropdown instead of silently landing on
-    // nothing because the pasted text didn't match any <option>.
-    const codesInOrder = [];
-    const segmentsByCode = new Map();
-    const haByCode = new Map();
-    let lastCode = null, lastFms = null;
-    for (const line of lines) {
-      const cells = line.split('\t');
-      const code = (cells[0] || '').trim();
-      const ha   = (cells[1] || '').trim();
-      const fms  = (cells[2] || '').trim();
-      const sampleNo = (cells[3] || '').trim();
-      const vzorcenje = normalizeZdruzi((cells[4] || '').trim());
-      if (!sampleNo) continue;
-      if (code) { lastCode = code; if (ha) haByCode.set(code, ha); }
-      if (fms)  lastFms  = fms;
-      if (!lastCode) continue;
-      if (!segmentsByCode.has(lastCode)) { segmentsByCode.set(lastCode, []); codesInOrder.push(lastCode); }
-      segmentsByCode.get(lastCode).push({ fms: lastFms || null, sampleNo, vzorcenje });
-    }
-
-    for (const code of codesInOrder) {
-      const known = fields.find(f => f.code === code);
-      const pastedHa = haByCode.get(code);
-      // Slovenian Excel exports use a comma decimal separator — same fix
-      // as the plain code-list paste below.
-      const hectares = known?.area ?? (pastedHa ? pastedHa.replace(',', '.') : null);
-      const row = ensureGerkRowForPaste(code, hectares);
-      if (row) addGerkSegments(row, segmentsByCode.get(code));
-    }
-    woGerkPasteInput.value = '';
-    return;
-  }
-
-  // Plain code list (comma/semicolon-separated, or one code[+ha] per
-  // line) — unchanged from before.
-  const entries = [];
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (line.includes('\t')) {
-      const [code, hectares] = line.split('\t').map(s => s.trim());
-      // Slovenian Excel exports use a comma decimal separator, but
-      // <input type="number"> only accepts a period — silently rejects
-      // "2,5" otherwise, leaving the field empty with no explanation.
-      if (code) entries.push({ code, hectares: hectares ? hectares.replace(',', '.') : null });
-    } else {
-      line.split(/[,;]/).map(s => s.trim()).filter(Boolean)
-        .forEach(code => entries.push({ code, hectares: null }));
-    }
-  }
+  const entries = parseGerkPasteText(woGerkPasteInput.value);
   if (!entries.length) return;
-
-  for (const { code, hectares } of entries) ensureGerkRowForPaste(code, hectares);
+  for (const { code, hectares, segments } of entries) {
+    // Ha is only used as a fallback — the known field's own area (if
+    // any) still wins, since that's the authoritative value once a
+    // field exists; the pasted Ha only matters for a field that's
+    // unknown, or known but missing an area.
+    const known = fields.find(f => f.code === code);
+    const row = ensureGerkRowForPaste(code, known?.area ?? hectares);
+    if (segments && row) addGerkSegments(row, segments);
+  }
   woGerkPasteInput.value = '';
 });
 
