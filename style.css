@@ -703,6 +703,21 @@ input, select, textarea { font-family: inherit; }
   gap: 8px;
 }
 
+/* Phone-only compact header line + back button + tap-to-edit disclosure
+   for date/status (see buildWoHeaderSummary()/toggleWoDateEdit() in
+   app.js) — all hidden on desktop by default; the matching phone-only
+   block near the bottom of this file turns them on and hides what they
+   replace. The date/status *panels* are a special case: they must stay
+   visible on desktop regardless of the `hidden` attribute app.js sets on
+   them (collapsed-by-default state for phone), so that's overridden here
+   unconditionally rather than in the phone block. */
+.wo-back-btn, .wo-header-summary, .wo-date-summary, .wo-date-edit-btn, .wo-status-edit-btn {
+  display: none;
+}
+.wo-date-panel[hidden] { display: flex; }
+
+.wo-gerk-pager { display: none; }
+
 .wo-header-stranka {
   flex: 1.3 1 140px;
   align-self: center;
@@ -1851,8 +1866,8 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .wo-detail-map-wrap {
   position: relative;
-  height: 42vh;
-  max-height: 380px;
+  height: 34vh; /* was 42vh — reduced ~20% for more room below on phone */
+  max-height: 300px; /* was 380px */
   flex-shrink: 0;
 }
 
@@ -2262,6 +2277,74 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     z-index: 80;
   }
   .wo-list-layout--map-active #workOrdersList { padding-bottom: 35dvh; }
+
+  /* Work-order detail (#formModal) — fullscreen takeover instead of a
+     bottom sheet, with a back button in place of (alongside) the X.
+     Scoped to #formModal specifically, not .modal-sheet generally — no
+     other modal in the app changes. */
+  #formModal .modal-sheet {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    transform: none;
+  }
+  #formModal .modal-handle { display: none; }
+  .wo-back-btn { display: flex; order: -1; }
+
+  /* Compact header: the summary line replaces the raw fields visually
+     (the real fields stay in the DOM — buildWoHeaderSummary() just
+     mirrors them — and remain reachable via the date/status pencils
+     below), plus tighter padding/gaps overall. */
+  .wo-header-summary {
+    display: block;
+    font-size: .8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 0;
+  }
+  .modal-head.wo-modal-head { gap: 4px; padding: 10px 14px 6px; }
+  .wo-header-fields { gap: 6px; }
+
+  /* Date/status: plain text + pencil instead of an always-visible
+     input/select — tap to reveal the real control (toggleWoDateEdit()/
+     woStatusEditBtn's handler in app.js). */
+  .wo-date-summary { display: inline-block; font-size: .8125rem; font-weight: 600; }
+  .wo-date-edit-btn { display: inline-flex; width: 28px; height: 28px; }
+  /* :not([hidden]), not a flat override — app.js still controls whether
+     this shows at all (admin + phone only) via the hidden attribute;
+     this just supplies its phone-only visual when it's not hidden. */
+  .wo-status-edit-btn:not([hidden]) { display: inline-flex; width: 28px; height: 28px; }
+  .wo-date-panel[hidden] { display: none; }
+  .wo-date-panel:not([hidden]) { margin-top: 4px; width: 100%; }
+
+  /* GERK pager: one .wlg-row fills the remaining height instead of a
+     scrollable list — see updateGerkPaging() in app.js. The field
+     wrapping the GERK list grows to fill whatever space "Čas na poti"
+     above it doesn't use; the one visible row then grows to fill THAT,
+     scrolling internally only if its own content (many segments) is
+     still too tall. */
+  .wo-gerk-field { flex: 1; min-height: 0; }
+  .wlg-table { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .wlg-table .wlg-row:not([hidden]) { flex: 1; min-height: 0; overflow-y: auto; }
+  /* :not([hidden]) — updateGerkPaging() in app.js still decides whether
+     this shows at all (hides it for a single-GERK order, desktop, or
+     map-expanded mode); this just supplies its phone-only visual. */
+  .wo-gerk-pager:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 0;
+    flex-shrink: 0;
+  }
+  .wo-gerk-pager-label { font-size: .8125rem; font-weight: 600; color: var(--text-secondary); }
 }
 
 

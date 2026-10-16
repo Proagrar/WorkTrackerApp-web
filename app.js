@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.110';
+const APP_VERSION = 'v3.111';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -60,6 +60,8 @@ const nextMonthBtn = document.getElementById('nextMonthBtn');
 const formModal   = document.getElementById('formModal');
 const modalTitle  = document.getElementById('modalTitle');
 const modalClose  = document.getElementById('modalClose');
+const woBackBtn   = document.getElementById('woBackBtn'); // phone only — same close path as modalClose
+const woHeaderSummary = document.getElementById('woHeaderSummary'); // phone-only compact header line
 const workLogForm = document.getElementById('workLogForm');
 const workLogOrderLabel = document.getElementById('workLogOrderLabel');
 // Admin-only "assign a customer" control shown instead of
@@ -71,10 +73,14 @@ const woAssignCustomerInput       = document.getElementById('woAssignCustomerInp
 const woAssignCustomerSuggestions = document.getElementById('woAssignCustomerSuggestions');
 const workLogDateInput = document.getElementById('workLogDate');
 const workLogDateDisplay = document.getElementById('workLogDateDisplay');
+const woDateSummary = document.getElementById('woDateSummary'); // phone-only mirror of workLogDateDisplay
+const woDateEditBtn = document.getElementById('woDateEditBtn');
+const woDatePanel   = document.getElementById('woDatePanel');
 const woIzvajalecEdit = document.getElementById('woIzvajalecEdit');
 const woPlanDateWrap = document.getElementById('woPlanDateWrap');
 const woPlanDateInput = document.getElementById('woPlanDate');
 const woStatusEdit = document.getElementById('woStatusEdit');
+const woStatusEditBtn = document.getElementById('woStatusEditBtn'); // phone-only admin disclosure for woStatusEdit
 const woStatusBadge = document.getElementById('woStatusBadge');
 const woDeleteBtn = document.getElementById('woDeleteBtn');
 const woRestoreBtn = document.getElementById('woRestoreBtn');
@@ -125,6 +131,10 @@ const roadAddBtn  = document.getElementById('roadAddBtn');
 const roadCommentInput = document.getElementById('roadComment');
 const roadTimeListEl = document.getElementById('roadTimeList');
 const workLogGerkRowsEl = document.getElementById('workLogGerkRows');
+const woGerkPagerEl       = document.getElementById('woGerkPager'); // phone-only — see updateGerkPaging()
+const woGerkPagerLabelEl  = document.getElementById('woGerkPagerLabel');
+const woGerkPagerPrevBtn  = document.getElementById('woGerkPagerPrev');
+const woGerkPagerNextBtn  = document.getElementById('woGerkPagerNext');
 const wlgSelectionBar   = document.getElementById('wlgSelectionBar');
 const tractorInput = document.getElementById('tractor');
 const descInput   = document.getElementById('description');
@@ -993,6 +1003,33 @@ function setWorkLogDate(value) {
 }
 function updateWorkLogDateDisplay() {
   workLogDateDisplay.textContent = fmtSampleDate(workLogDateInput.value);
+  woDateSummary.textContent = workLogDateDisplay.textContent; // phone-only mirror
+  if (currentDetailWorkOrder) buildWoHeaderSummary();
+}
+
+// Phone-only tap-to-edit: date/status show as plain text in the compact
+// header, with a pencil revealing the real control — same disclosure
+// pattern as toggleGerkEdit()/.wlg-edit-panel, just for the header fields.
+function toggleWoDateEdit() {
+  woDatePanel.hidden = !woDatePanel.hidden;
+}
+woDateEditBtn.addEventListener('click', toggleWoDateEdit);
+
+let woStatusPanelOpen = false;
+woStatusEditBtn.addEventListener('click', () => {
+  woStatusPanelOpen = !woStatusPanelOpen;
+  woStatusEdit.hidden = !woStatusPanelOpen;
+});
+
+// Compact "123/Customer/izvaja: Name/16.10.2026/v delu" line — phone only
+// (hidden via CSS on desktop). Built from the same data the full fields
+// already show, so it can't drift out of sync with them.
+function buildWoHeaderSummary() {
+  const wo = currentDetailWorkOrder;
+  if (!wo) return;
+  const customer = wo.customers?.naziv || wo.customers?.company_name || '—';
+  const izvaja = wo.profiles?.full_name || '-';
+  woHeaderSummary.textContent = `${wo.stevilka || ''}/${customer}/izvaja: ${izvaja}/${workLogDateDisplay.textContent}/${wo.status}`;
 }
 
 // Same, but as a value an <input type="time"> will accept.
@@ -1110,6 +1147,43 @@ function renderSampleCommentCell(s) {
 }
 
 
+// Phone (max-width:899px) vs desktop — the app's one real breakpoint
+// (style.css has a matching comment at its own phone-only block). Used
+// wherever a layout decision needs JS, not just CSS.
+function isMobile() {
+  return window.matchMedia('(max-width: 899px)').matches;
+}
+
+// Phone-only: shows one .wlg-row at a time (filling the remaining screen
+// height via CSS) instead of a scrollable list, with ↑/↓ paging. Desktop,
+// an expanded map, or an empty list all just show everything normally —
+// this never touches which rows exist, only their `hidden` attribute, so
+// every existing per-row interaction (start/end, edit panel, samples,
+// admin multi-select) keeps working completely unchanged.
+let woGerkPageIndex = 0;
+function updateGerkPaging() {
+  const rows = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row'));
+  const n = rows.length;
+  if (!isMobile() || woMapExpanded || !n) {
+    rows.forEach(r => { r.hidden = false; });
+    woGerkPagerEl.hidden = true;
+    return;
+  }
+  if (woGerkPageIndex >= n) woGerkPageIndex = n - 1;
+  rows.forEach((r, i) => { r.hidden = i !== woGerkPageIndex; });
+  woGerkPagerEl.hidden = n <= 1;
+  woGerkPagerLabelEl.textContent = `GERK ${woGerkPageIndex + 1} / ${n}`;
+  woGerkPagerPrevBtn.disabled = woGerkPageIndex === 0;
+  woGerkPagerNextBtn.disabled = woGerkPageIndex === n - 1;
+}
+woGerkPagerPrevBtn.addEventListener('click', () => {
+  if (woGerkPageIndex > 0) { woGerkPageIndex--; updateGerkPaging(); }
+});
+woGerkPagerNextBtn.addEventListener('click', () => {
+  const n = workLogGerkRowsEl.querySelectorAll('.wlg-row').length;
+  if (woGerkPageIndex < n - 1) { woGerkPageIndex++; updateGerkPaging(); }
+});
+
 function renderWorkLogGerkRows(rows) {
   // Prune any selected code that no longer has a row (GERK removed,
   // order reloaded) so the selection bar's count never lies.
@@ -1119,6 +1193,7 @@ function renderWorkLogGerkRows(rows) {
   if (!rows.length) {
     workLogGerkRowsEl.innerHTML = `<p class="field-hint">Ta delovni nalog nima dodanih GERKOV.</p>`;
     updateGerkSelectionBar();
+    updateGerkPaging();
     return;
   }
   workLogGerkRowsEl.innerHTML = rows.map(r => {
@@ -1186,6 +1261,8 @@ function renderWorkLogGerkRows(rows) {
   wireGerkRowButtons();
   updateGerkSelectionBar();
   if (woMapExpanded) renderCompactGerkList();
+  woGerkPageIndex = 0;
+  updateGerkPaging();
 }
 
 // Compact code + segment-numbers + Start/Konec view, shown in place of
@@ -1276,6 +1353,7 @@ function updateMapExpandState() {
   wlgCompactList.hidden = !woMapExpanded;
   woMapExpandBtn.textContent = woMapExpanded ? '⤡ Pomanjšaj zemljevid' : '⛶ Razširi zemljevid';
   if (woMapExpanded) renderCompactGerkList();
+  updateGerkPaging(); // restores per-row hidden state correctly either way
   // The map's own container just changed size — Leaflet only re-measures
   // when told to, and needs the new size already applied in the DOM
   // (hence rAF, not immediate) or it reads the stale one mid-transition.
@@ -1378,10 +1456,15 @@ function updateOrderHeader() {
 
   // Status: admin gets an editable dropdown (only way to change it now
   // that there's no claim button); everyone else gets a read-only badge.
-  woStatusEdit.hidden = !isAdmin;
+  // On phone, admin's dropdown is additionally collapsed behind a pencil
+  // (woStatusEditBtn, toggles woStatusPanelOpen) so the compact header
+  // doesn't show a <select> inline — desktop behavior is unchanged.
+  const statusCollapsed = isAdmin && isMobile();
+  woStatusEdit.hidden = statusCollapsed ? !woStatusPanelOpen : !isAdmin;
+  woStatusEditBtn.hidden = !statusCollapsed;
   if (isAdmin) woStatusEdit.value = wo.status;
-  woStatusBadge.hidden = isAdmin;
-  if (!isAdmin) {
+  woStatusBadge.hidden = isAdmin && !isMobile();
+  if (!woStatusBadge.hidden) {
     woStatusBadge.textContent = wo.status;
     woStatusBadge.className = `wo-status-badge wo-status--${slugStatus(wo.status)}`;
   }
@@ -1412,6 +1495,7 @@ function updateOrderHeader() {
   if (wo.status !== 'Plan' && izvajaLabel) metaParts.push(`Izvaja: ${izvajaLabel}`);
   if (totalMin > 0) metaParts.push(`Skupaj: ${fmtHM(totalMin)}`);
   woHeaderMeta.textContent = metaParts.join(' · ');
+  buildWoHeaderSummary();
 }
 
 // ── Modal ──────────────────────────────────────────────────────
@@ -1438,6 +1522,8 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   currentDetailPlanId     = null;
   currentDetailPlanDate   = null;
   currentDetailPlanIsHeaderDate = !!planId;
+  woDatePanel.hidden = true; // phone-only tap-to-edit — always starts collapsed
+  woStatusPanelOpen = false;
 
   modalTitle.textContent = workOrder.stevilka || 'Delovni nalog';
   hideFormFeedback();
@@ -3946,6 +4032,7 @@ fabMenu.querySelectorAll('.fab-menu-item').forEach(btn => {
 });
 
 modalClose.addEventListener('click', closeModal);
+woBackBtn.addEventListener('click', closeModal);
 cancelBtn.addEventListener('click', closeModal);
 
 formModal.addEventListener('click', e => { if (e.target === formModal) closeModal(); });
@@ -5350,7 +5437,7 @@ function updateWoMapToggleButton() {
   // On phones the label stays short (the map has its own ✕ in the
   // corner and the button's active color already says it's open) so
   // all toolbar buttons fit on one row.
-  const isPhone = window.matchMedia('(max-width: 899px)').matches;
+  const isPhone = isMobile();
   woMapToggleBtn.textContent = woMapOverviewActive && !isPhone ? '◀ Skrij zemljevid' : '🗺 Zemljevid';
   woMapToggleBtn.title = woMapOverviewActive ? 'Skrij pregled na zemljevidu' : 'Prikaži polja delovnih nalogov na zemljevidu';
 }
@@ -5389,7 +5476,9 @@ function ensureWoOverviewMap() {
 // Račun (work actually done, billed or not) are green; Plan/V delu
 // (not done yet) are orange. Same status set as slugStatus/WO_STATUS_ORDER.
 function woMapOverviewColor(status) {
-  return (status === 'Izvedeno' || status === 'Izdan Račun') ? '#16A34A' : '#F59E0B';
+  if (status === 'Izvedeno' || status === 'Izdan Račun') return '#16A34A'; // green
+  if (status === 'V delu') return '#F59E0B'; // orange
+  return '#9CA3AF'; // Plan (and anything else) — grey, matches --text-muted
 }
 
 // Below this zoom, real field boundaries are too small/cluttered to

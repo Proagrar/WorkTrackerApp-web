@@ -320,6 +320,13 @@
       <div class="modal-handle" aria-hidden="true"></div>
       <div class="modal-head wo-modal-head">
         <div class="wo-modal-head-top">
+          <!-- Phone only (CSS) — takes over from #modalClose, which stays
+               for desktop. Both call the same closeModal(). -->
+          <button type="button" id="woBackBtn" class="btn btn-icon wo-back-btn" aria-label="Nazaj">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M12 4 L6 10 L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
           <h3 id="modalTitle" class="modal-title">Delovni nalog</h3>
           <button id="modalClose" class="btn btn-icon" aria-label="Zapri">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -328,6 +335,10 @@
             </svg>
           </button>
         </div>
+        <!-- Phone only (CSS) — compact "123/Customer/izvaja: Name/date/status"
+             line. Built in buildWoHeaderSummary(), always kept in sync with
+             the real fields below (which stay the source of truth). -->
+        <p id="woHeaderSummary" class="wo-header-summary"></p>
         <div class="wo-header-fields">
           <span id="workLogOrderLabel" class="wo-header-stranka"></span>
           <!-- Admin only, shown instead of workLogOrderLabel when the
@@ -345,7 +356,13 @@
                #workLogDateDisplay overlays the Slovenian-formatted text.
                Kept in sync by setWorkLogDate()/updateWorkLogDateDisplay()
                in app.js. -->
-          <span class="date-sl-wrap field-input">
+          <!-- Phone only (CSS): #woDateSummary + #woDateEditBtn show
+               instead, revealing the real panel below on tap — see
+               toggleWoDateEdit() in app.js. Desktop is untouched (panel
+               always visible, summary/pencil hidden). -->
+          <span id="woDateSummary" class="wo-date-summary"></span>
+          <button type="button" id="woDateEditBtn" class="btn btn-icon wo-date-edit-btn" aria-label="Uredi datum">✎</button>
+          <span class="date-sl-wrap field-input wo-date-panel" id="woDatePanel">
             <input class="date-sl-input" type="date" id="workLogDate" />
             <span class="date-sl-display" id="workLogDateDisplay" aria-hidden="true"></span>
           </span>
@@ -363,13 +380,16 @@
             <span class="wo-plan-date-label">Planirano</span>
             <input class="field-input" type="date" id="woPlanDate" />
           </label>
-          <!-- Admin only: change status directly — unreachable any other way. -->
+          <!-- Admin only: change status directly — unreachable any other way.
+               Phone: collapsed behind #woStatusEditBtn (see updateOrderHeader()
+               in app.js); desktop: always visible as before, pencil hidden. -->
           <select class="field-input field-select" id="woStatusEdit" hidden>
             <option value="Plan">Plan</option>
             <option value="V delu">V delu</option>
             <option value="Izvedeno">Izvedeno</option>
             <option value="Izdan Račun">Izdan Račun</option>
           </select>
+          <button type="button" id="woStatusEditBtn" class="btn btn-icon wo-status-edit-btn" aria-label="Spremeni status" hidden>✎</button>
           <span id="woStatusBadge" class="wo-status-badge" hidden></span>
         </div>
         <!-- Everything else that used to sit up here (who worked on it,
@@ -424,7 +444,7 @@
         </div>
 
         <!-- GERKs: one row per planned field, Start/Stop logs start/end time -->
-        <div class="field">
+        <div class="field wo-gerk-field">
           <label class="field-label">GERKI</label>
           <!-- Admin only: import a KML file — enriches the matching GERK's
                row if it's already on this order, adds it first if not. -->
@@ -458,6 +478,15 @@
             <div class="alert alert-error" id="woImportZonesError" hidden role="alert"></div>
           </div>
           <div id="workLogGerkRows" class="wlg-table"></div>
+          <!-- Phone only (CSS): pages through .wlg-row elements one at a
+               time instead of scrolling the whole list — see
+               updateGerkPaging() in app.js. Inert (hidden) on desktop and
+               whenever the map is expanded (compact list below takes over). -->
+          <div id="woGerkPager" class="wo-gerk-pager" hidden>
+            <button type="button" id="woGerkPagerPrev" class="btn btn-icon" aria-label="Prejšnji GERK">↑</button>
+            <span id="woGerkPagerLabel" class="wo-gerk-pager-label"></span>
+            <button type="button" id="woGerkPagerNext" class="btn btn-icon" aria-label="Naslednji GERK">↓</button>
+          </div>
           <!-- Shown instead of the above while the map is expanded (see
                woMapExpandBtn) — code + segment numbers only, click to
                highlight on the map, no edit controls. -->
