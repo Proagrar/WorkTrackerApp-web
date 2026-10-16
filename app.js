@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.112';
+const APP_VERSION = 'v3.113';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -63,6 +63,7 @@ const modalClose  = document.getElementById('modalClose');
 const woBackBtn   = document.getElementById('woBackBtn'); // phone only — same close path as modalClose
 const woHeaderSummary = document.getElementById('woHeaderSummary'); // phone-only compact header line
 const workLogForm = document.getElementById('workLogForm');
+const woTravelTimeField = document.getElementById('woTravelTimeField'); // phone only — see layoutWoDetailSections()
 const workLogOrderLabel = document.getElementById('workLogOrderLabel');
 // Admin-only "assign a customer" control shown instead of
 // workLogOrderLabel when the open order has no stranka_id at all —
@@ -1154,6 +1155,29 @@ function isMobile() {
   return window.matchMedia('(max-width: 899px)').matches;
 }
 
+// Phone only: moves #woTravelTimeField above the map and #roadComment
+// (its opomba input) to right below the map, as direct children of
+// .wo-detail-layout alongside the map wrap and #workLogForm — matching
+// what Matej asked for after seeing the fullscreen phone layout in
+// practice. Desktop resets both back to their original nested position
+// inside #workLogForm (first child, with #roadComment restored as
+// #woTravelTimeField's own last child) — real DOM moves, not CSS
+// order, since they cross levels of nesting that CSS order can't reach.
+// Idempotent (insertBefore/appendChild just no-op if already placed),
+// so it's safe to call on every openWorkOrderDetail() regardless of
+// where either element currently sits.
+function layoutWoDetailSections() {
+  const layout  = document.querySelector('.wo-detail-layout');
+  const mapWrap = document.querySelector('.wo-detail-map-wrap');
+  if (isMobile()) {
+    layout.insertBefore(woTravelTimeField, mapWrap);
+    layout.insertBefore(roadCommentInput, workLogForm);
+  } else {
+    workLogForm.insertBefore(woTravelTimeField, workLogForm.firstChild);
+    woTravelTimeField.appendChild(roadCommentInput);
+  }
+}
+
 // Phone-only: shows one .wlg-row at a time (filling the remaining screen
 // height via CSS) instead of a scrollable list, with ↑/↓ paging. Desktop,
 // an expanded map, or an empty list all just show everything normally —
@@ -1524,6 +1548,7 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   currentDetailPlanIsHeaderDate = !!planId;
   woDatePanel.hidden = true; // phone-only tap-to-edit — always starts collapsed
   woStatusPanelOpen = false;
+  layoutWoDetailSections(); // phone only — see its own comment
 
   modalTitle.textContent = workOrder.stevilka || 'Delovni nalog';
   hideFormFeedback();

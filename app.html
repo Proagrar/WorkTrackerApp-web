@@ -426,7 +426,10 @@
           </div>
         </div>
         <div id="workLogForm" class="work-form wo-detail-content">
-        <div class="field">
+        <!-- Phone only (JS): layoutWoDetailSections() in app.js relocates
+             this field (and #roadComment, see below) to sit above/below
+             the map instead of here — desktop keeps this exact position. -->
+        <div class="field" id="woTravelTimeField">
           <label class="field-label">Čas na poti</label>
           <div id="roadTimeList" class="road-time-list"></div>
           <div class="time-wrap">
@@ -440,6 +443,8 @@
             <span class="time-sep">min</span>
             <button type="button" id="roadAddBtn" class="btn btn-secondary btn-sm">Dodaj</button>
           </div>
+          <!-- Phone only (JS): moved out to sit right below the map —
+               see layoutWoDetailSections(). Stays here on desktop. -->
           <input class="field-input road-comment-input" type="text" id="roadComment" placeholder="Opomba (neobvezno)" autocomplete="off" maxlength="200">
         </div>
 

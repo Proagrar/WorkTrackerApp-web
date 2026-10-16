@@ -2337,23 +2337,70 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .wo-date-panel[hidden] { display: none; }
   .wo-date-panel:not([hidden]) { margin-top: 4px; width: 100%; }
 
-  /* Čas na poti: the add-row controls used the same 46px/16px inputs as
-     every other form field, which ate a disproportionate share of the
-     screen above the GERK list. Selects are shrunk the same way the
-     header's own date/status selects already are (see
-     .wo-header-fields .field-input above) — safe because a closed
-     <select> doesn't trigger iOS's input-zoom. The free-text opomba
-     input keeps its 16px font (shrinking that WOULD trigger zoom-on-
-     focus) but loses the extra vertical padding. */
-  #workLogForm .time-wrap .field-select {
+  /* Čas na poti + Opomba now live outside #workLogForm on phone (JS
+     physically relocates them — see layoutWoDetailSections() in
+     app.js): the entry row sits above the map, the opomba input right
+     below it, as direct flex children of .wo-detail-layout. Desktop
+     keeps both nested inside #workLogForm exactly as before — none of
+     this block's selectors reach there. */
+  .wo-detail-layout > #woTravelTimeField,
+  .wo-detail-layout > #roadComment {
+    flex-shrink: 0;
+    margin: 0 14px;
+  }
+  .wo-detail-layout > #woTravelTimeField { margin-top: 10px; }
+
+  /* The add-row controls used the same 46px/16px inputs as every other
+     form field. Selects are shrunk the same way the header's own
+     date/status selects already are — safe because a closed <select>
+     doesn't trigger iOS's input-zoom — and flex-wrap:nowrap + flex:1
+     per select (compressing instead of wrapping) is what actually gets
+     "Traktor | 0 h | 30 min | Dodaj" onto a single row at phone width. */
+  #woTravelTimeField .time-wrap { flex-wrap: nowrap; gap: 4px; }
+  #woTravelTimeField .time-wrap .field-select {
+    flex: 1 1 0;
+    min-width: 0;
     height: 34px;
-    padding: 0 26px 0 10px;
+    padding: 0 20px 0 8px;
     font-size: .8125rem;
   }
-  #workLogForm .time-wrap .time-min { padding-right: 22px; }
-  #workLogForm .road-comment-input { height: 38px; padding: 0 12px; }
-  #workLogForm .road-time-row { padding: 6px 10px; font-size: .75rem; }
+  #woTravelTimeField .time-wrap .time-min { flex: 0 1 50px; padding-right: 16px; }
+  #woTravelTimeField .time-wrap .time-sep { font-size: .75rem; }
+  #woTravelTimeField #roadAddBtn { padding: 0 10px; flex-shrink: 0; }
+  #woTravelTimeField .road-time-row { padding: 6px 10px; font-size: .75rem; }
+
+  /* Opomba: shorter field at Matej's request — explicitly trading away
+     the usual 16px input-zoom floor (see the comment on .field-input
+     itself) for a lower-profile field here; typing in it will
+     auto-zoom the page on iOS the way other text inputs in this app
+     deliberately don't. */
+  .wo-detail-layout > #roadComment { height: 34px; padding: 0 12px; font-size: .8125rem; }
+
   #workLogForm .wlg-row { padding: 8px 10px; gap: 6px; }
+
+  /* Map: the expand/collapse toggle is a desktop power-feature (swaps
+     the GERK list for a compact code+segment view to give the map more
+     room) that doesn't make sense once the map is already full-width
+     on phone — hidden outright, which also frees the top-left corner
+     for Leaflet's own zoom +/- control. Ceste/imena moves up into that
+     freed slot, shifted right by the same 54px the overview map's copy
+     of this exact button already uses to clear the same zoom control
+     (see .wo-map-layers-btn--overview above). */
+  #woMapExpandBtn { display: none; }
+  .wo-map-layers-btn--detail { top: 10px; left: 54px; }
+
+  /* GERK list admin tools (KML import, paste-to-add, sampling export)
+     and the bottom action row (Zaključi delo/Izbriši nalog) all assume
+     real screen width and don't fit the phone's one-GERK-at-a-time
+     card — hidden here. Nothing is left below the map except the
+     opomba field (relocated right below it, see
+     .wo-detail-layout > #roadComment above) and the GERK list itself. */
+  #woImportZonesWrap,
+  #woAddExistingGerkWrap,
+  #woExportSamplingWrap,
+  #formModal .form-actions {
+    display: none;
+  }
 
   /* GERK pager: one .wlg-row fills the remaining height instead of a
      scrollable list — see updateGerkPaging() in app.js. The field
