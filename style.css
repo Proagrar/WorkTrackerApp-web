@@ -2353,21 +2353,28 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   /* The add-row controls used the same 46px/16px inputs as every other
      form field. Selects are shrunk the same way the header's own
      date/status selects already are — safe because a closed <select>
-     doesn't trigger iOS's input-zoom — and flex-wrap:nowrap + flex:1
-     per select (compressing instead of wrapping) is what actually gets
-     "Traktor | 0 h | 30 min | Dodaj" onto a single row at phone width. */
+     doesn't trigger iOS's input-zoom — and flex-wrap:nowrap is what
+     actually gets "Traktor | 0 h | 30 min | Dodaj" onto a single row at
+     phone width. Widths aren't equal: #roadType ("Traktor"/"Avto") is
+     the only one with real text to fit, #roadHour only ever shows 0-23
+     so it can be narrow, and the extra room that frees up goes to
+     #roadMin (.time-min) per Matej's request. */
   #woTravelTimeField .time-wrap { flex-wrap: nowrap; gap: 4px; }
   #woTravelTimeField .time-wrap .field-select {
-    flex: 1 1 0;
-    min-width: 0;
     height: 34px;
     padding: 0 20px 0 8px;
     font-size: .8125rem;
   }
-  #woTravelTimeField .time-wrap .time-min { flex: 0 1 50px; padding-right: 16px; }
+  #woTravelTimeField #roadType { flex: 1.6 1 0; min-width: 0; }
+  #woTravelTimeField #roadHour { flex: 0 0 46px; padding: 0 14px 0 6px; }
+  #woTravelTimeField .time-wrap .time-min { flex: 0 0 58px; padding-right: 16px; }
   #woTravelTimeField .time-wrap .time-sep { font-size: .75rem; }
   #woTravelTimeField #roadAddBtn { padding: 0 10px; flex-shrink: 0; }
   #woTravelTimeField .road-time-row { padding: 6px 10px; font-size: .75rem; }
+  /* The common "no entries yet" case left an empty list still taking up
+     a label-gap + margin-bottom's worth of dead space above the add
+     row — collapse it entirely when there's nothing in it. */
+  #woTravelTimeField .road-time-list:empty { display: none; margin-bottom: 0; }
 
   /* Opomba: shorter field at Matej's request — explicitly trading away
      the usual 16px input-zoom floor (see the comment on .field-input
@@ -2375,6 +2382,16 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
      auto-zoom the page on iOS the way other text inputs in this app
      deliberately don't. */
   .wo-detail-layout > #roadComment { height: 34px; padding: 0 12px; font-size: .8125rem; }
+
+  /* #workLogForm now wraps only the GERKI field on phone (Čas na poti
+     and the opomba input were both relocated above/below the map) —
+     its old 18px top padding and 12px inter-field gap were sized for a
+     form with several fields in it, leaving a dead gap between the
+     opomba input (now a sibling above it, not a child) and the "GERKI"
+     label. Collapsed to just enough to separate it from the opomba
+     field, and the field itself drops the matching built-in label gap. */
+  #workLogForm.wo-detail-content { padding-top: 4px; gap: 0; }
+  #workLogForm .wo-gerk-field { gap: 4px; }
 
   #workLogForm .wlg-row { padding: 8px 10px; gap: 6px; }
 
@@ -2388,6 +2405,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
      (see .wo-map-layers-btn--overview above). */
   #woMapExpandBtn { display: none; }
   .wo-map-layers-btn--detail { top: 10px; left: 54px; }
+  /* The Leaflet/Esri attribution strip along the bottom edge — not
+     worth the vertical space it eats on a phone-width map. */
+  #woDetailMap .leaflet-control-attribution { display: none; }
 
   /* GERK list admin tools (KML import, paste-to-add, sampling export)
      and the bottom action row (Zaključi delo/Izbriši nalog) all assume
@@ -2403,26 +2423,42 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   }
 
   /* GERK pager: one .wlg-row fills the remaining height instead of a
-     scrollable list — see updateGerkPaging() in app.js. The field
-     wrapping the GERK list grows to fill whatever space "Čas na poti"
-     above it doesn't use; the one visible row then grows to fill THAT,
-     scrolling internally only if its own content (many segments) is
-     still too tall. */
-  .wo-gerk-field { flex: 1; min-height: 0; }
-  .wlg-table { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+     scrollable list — see updateGerkPaging() in app.js. The field is a
+     2-row grid (label on its own row; table + pager sharing the row
+     below, side by side) instead of a plain flex column, so the pager
+     gets its own real column — a fixed-width strip running the full
+     card height — rather than floating over the card's content, which
+     either needed huge asymmetric padding on every row (wasting space
+     on rows the pager doesn't visually reach) or overlapped text. */
+  .wo-gerk-field {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 1fr;
+    column-gap: 8px;
+  }
+  .wo-gerk-field > .field-label { grid-column: 1 / -1; }
+  .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .wlg-table .wlg-row:not([hidden]) { flex: 1; min-height: 0; overflow-y: auto; }
   /* :not([hidden]) — updateGerkPaging() in app.js still decides whether
      this shows at all (hides it for a single-GERK order, desktop, or
      map-expanded mode); this just supplies its phone-only visual. */
   .wo-gerk-pager:not([hidden]) {
+    grid-column: 2;
+    grid-row: 2;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 6px 0;
-    flex-shrink: 0;
+    gap: 8px;
+    width: 44px;
+    background: var(--border-light);
+    border-radius: 14px;
+    padding: 8px 0;
   }
-  .wo-gerk-pager-label { font-size: .8125rem; font-weight: 600; color: var(--text-secondary); }
+  .wo-gerk-pager:not([hidden]) .btn-icon { width: 32px; height: 32px; }
+  .wo-gerk-pager-label { font-size: .75rem; font-weight: 700; color: var(--text-secondary); }
 }
 
 

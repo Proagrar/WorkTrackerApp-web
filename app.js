@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.113';
+const APP_VERSION = 'v3.114';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -1196,7 +1196,7 @@ function updateGerkPaging() {
   if (woGerkPageIndex >= n) woGerkPageIndex = n - 1;
   rows.forEach((r, i) => { r.hidden = i !== woGerkPageIndex; });
   woGerkPagerEl.hidden = n <= 1;
-  woGerkPagerLabelEl.textContent = `GERK ${woGerkPageIndex + 1} / ${n}`;
+  woGerkPagerLabelEl.textContent = `${woGerkPageIndex + 1}/${n}`;
   woGerkPagerPrevBtn.disabled = woGerkPageIndex === 0;
   woGerkPagerNextBtn.disabled = woGerkPageIndex === n - 1;
 }
