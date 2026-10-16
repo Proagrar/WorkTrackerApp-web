@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.108';
+const APP_VERSION = 'v3.109';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -1623,9 +1623,19 @@ async function showWoDetailMap(workOrder) {
   currentGerkSegments = segments || [];
   renderGerkSegmentationInfo();
 
+  // When a GERK has an imported KML zone, that shape wins outright — the
+  // official ARKOD polygon for that same code is skipped rather than
+  // drawn underneath/alongside it. A KML import means the real boundary
+  // for this GERK is known to differ from (or only cover part of) the
+  // registry shape, so showing both as if equally valid is misleading;
+  // every .shapes consumer below (highlight, bounds, the 📍 link, KML
+  // export) already falls back to .zoneLayers when .shapes is empty, so
+  // simply not registering the ARKOD shape here is enough.
+  const kmlCoveredCodes = new Set((segments || []).filter(s => s.segment_geojson).map(s => s.gerk_code));
+
   const shapeLayers = [];
   for (const row of (shapes || [])) {
-    if (!row.geojson) continue;
+    if (!row.geojson || kmlCoveredCodes.has(row.gerk_code)) continue;
     const layer = L.geoJSON(row.geojson, { style: WO_MAP_SHAPE_STYLE })
       .bindTooltip(row.gerk_code).addTo(woMapGerkLayer);
     layer.on('mouseover', () => highlightGerkRow(row.gerk_code, true));
@@ -3507,19 +3517,24 @@ function updateReportsCustomerFilterButtonLabel() {
 // Derived ratios shared by each order row and the totals row — totals
 // recompute these from the summed fields rather than averaging each row's
 // own ratio (averaging rates would be wrong), same principle already used
-// in updateReportsSummary().
+// in updateReportsSummary(). Every ha-based rate uses executed_ha (GERKs
+// actually completed — start AND end time logged), not total_ha (every
+// GERK assigned, including ones a "V delu" order hasn't touched yet) —
+// otherwise a part-done order's rates would be diluted by ha nobody has
+// worked. total_ha itself stays visible as its own column for context.
 function reportsRowMetrics(r) {
   const hours = r.tracked_minutes / 60;
   const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
   const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
   const workRoadTotal = r.tracked_minutes + roadMinutes;
+  const executedHa = r.executed_ha || 0;
   return {
     perHour: hours > 0 ? (r.captures_count / hours).toFixed(2) : '—',
-    perHa: r.total_ha > 0 ? (r.captures_count / r.total_ha).toFixed(2) : '—',
-    haPerCapture: r.captures_count > 0 ? (r.total_ha / r.captures_count).toFixed(3) : '—',
-    timePerHa: r.total_ha > 0 ? fmtHM(Math.round(r.tracked_minutes / r.total_ha)) : '—',
-    haPerHour: hours > 0 ? (r.total_ha / hours).toFixed(2) : '—',
-    haPerHourWithRoad: hoursWithRoad > 0 ? (r.total_ha / hoursWithRoad).toFixed(2) : '—',
+    perHa: executedHa > 0 ? (r.captures_count / executedHa).toFixed(2) : '—',
+    haPerCapture: r.captures_count > 0 ? (executedHa / r.captures_count).toFixed(3) : '—',
+    timePerHa: executedHa > 0 ? fmtHM(Math.round(r.tracked_minutes / executedHa)) : '—',
+    haPerHour: hours > 0 ? (executedHa / hours).toFixed(2) : '—',
+    haPerHourWithRoad: hoursWithRoad > 0 ? (executedHa / hoursWithRoad).toFixed(2) : '—',
     workRoadPct: workRoadTotal > 0 ? `${Math.round(r.tracked_minutes / workRoadTotal * 100)}%` : '—',
     strosek: r.strosek != null ? `${Number(r.strosek).toFixed(2)} €` : '—',
   };
@@ -3529,9 +3544,10 @@ function reportsRowMetrics(r) {
 // rows are currently "in scope" (selected, or filtered if none selected) —
 // reportsRowMetrics() then turns this into the same ratio columns.
 function reportsAggregateRow(rowsForTotal) {
-  const agg = { total_ha: 0, tracked_minutes: 0, gap_minutes: 0, total_minutes: 0, captures_count: 0, road_traktor_minutes: 0, road_avto_minutes: 0, strosek: 0 };
+  const agg = { total_ha: 0, executed_ha: 0, tracked_minutes: 0, gap_minutes: 0, total_minutes: 0, captures_count: 0, road_traktor_minutes: 0, road_avto_minutes: 0, strosek: 0 };
   for (const r of rowsForTotal) {
     agg.total_ha += Number(r.total_ha) || 0;
+    agg.executed_ha += Number(r.executed_ha) || 0;
     agg.tracked_minutes += r.tracked_minutes || 0;
     agg.gap_minutes += r.gap_minutes || 0;
     agg.total_minutes += r.total_minutes || 0;
@@ -3650,7 +3666,7 @@ function renderReportsChart(rows) {
     const bucket = byDate.get(key) || { tracked: 0, gap: 0, ha: 0 };
     bucket.tracked += r.tracked_minutes || 0;
     bucket.gap += r.gap_minutes || 0;
-    bucket.ha += r.total_ha || 0;
+    bucket.ha += r.executed_ha || 0; // executed, not assigned — see reportsRowMetrics()' comment
     byDate.set(key, bucket);
   });
   const dates = [...byDate.keys()].sort();
@@ -3842,16 +3858,17 @@ function renderReportsTable() {
             <th>Status</th>
             <th>Izvajalec</th>
             <th>Ha</th>
+            <th title="Ha od dodeljenih GERK-ov, ki imajo zabeležen začetni IN končni čas — pri delno opravljenem nalogu manj kot Ha">Izvedeni ha</th>
             <th title="Zabeležen čas">Zabeležen</th>
             <th title="Čas med GERK-i">Med GERK-i</th>
             <th title="Skupni čas">Skupaj</th>
             <th title="Zajete točke">Točke</th>
             <th>Točk / h</th>
-            <th>Točk / ha</th>
-            <th title="Ha / točko">Ha / točko</th>
-            <th title="Zabeležen čas / skupni ha">Čas / ha</th>
-            <th title="Ha na uro zabeleženega časa, brez poti">Ha/h</th>
-            <th title="Ha na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
+            <th title="Zajete točke / izvedeni ha">Točk / ha</th>
+            <th title="Izvedeni ha / zajeto točko">Ha / točko</th>
+            <th title="Zabeležen čas / izvedeni ha">Čas / ha</th>
+            <th title="Izvedeni ha na uro zabeleženega časa, brez poti">Ha/h</th>
+            <th title="Izvedeni ha na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
             <th title="Prevoz s traktorjem (čas na poti)">Prevoz traktor</th>
             <th title="Prevoz z avtom (čas na poti)">Prevoz avto</th>
             <th title="Delež zabeleženega časa v skupnem času (delo + pot)">Delo / pot</th>
@@ -3868,6 +3885,7 @@ function renderReportsTable() {
               <td></td>
               <td colspan="4">${escHtml(totalsLabel)}</td>
               <td>${totals.total_ha.toFixed(2)}</td>
+              <td>${totals.executed_ha.toFixed(2)}</td>
               <td>${fmtHM(totals.tracked_minutes)}</td>
               <td>${fmtHM(totals.gap_minutes)}</td>
               <td>${fmtHM(totals.total_minutes)}</td>
@@ -3894,6 +3912,7 @@ function renderReportsTable() {
               <td><span class="wo-status-badge wo-status--${slugStatus(r.status)}">${escHtml(r.status)}</span></td>
               <td>${escHtml(r.izvajalec_name)}</td>
               <td>${Number(r.total_ha).toFixed(2)}</td>
+              <td>${Number(r.executed_ha || 0).toFixed(2)}</td>
               <td>${fmtHM(r.tracked_minutes)}</td>
               <td>${fmtHM(r.gap_minutes)}</td>
               <td>${fmtHM(r.total_minutes)}</td>
