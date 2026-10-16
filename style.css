@@ -2298,7 +2298,15 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   /* Compact header: the summary line replaces the raw fields visually
      (the real fields stay in the DOM — buildWoHeaderSummary() just
      mirrors them — and remain reachable via the date/status pencils
-     below), plus tighter padding/gaps overall. */
+     below), plus tighter padding/gaps overall. Stranka name, the status
+     badge, and the "Izvaja/Skupaj čas" meta line are all redundant with
+     the summary line on phone (it already carries that same info) — left
+     visible, they doubled up the header to ~6 lines tall and squeezed
+     the GERK list below to a sliver. Desktop is untouched — none of
+     these three selectors appear in the base (non-media) ruleset. */
+  .wo-header-stranka, #woStatusBadge, #woHeaderMeta {
+    display: none;
+  }
   .wo-header-summary {
     display: block;
     font-size: .8125rem;
@@ -2309,7 +2317,12 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     white-space: nowrap;
     padding: 2px 0;
   }
-  .modal-head.wo-modal-head { gap: 4px; padding: 10px 14px 6px; }
+  /* iOS status bar / Dynamic Island sits right over the fixed-position
+     sheet's top edge once it's fullscreen (no bottom-sheet margin to
+     absorb it any more) — top padding extended by the real inset instead
+     of a flat value so it degrades safely to plain 10px on a non-notched
+     phone (env() resolves to 0 there). */
+  .modal-head.wo-modal-head { gap: 4px; padding: calc(10px + env(safe-area-inset-top)) 14px 6px; }
   .wo-header-fields { gap: 6px; }
 
   /* Date/status: plain text + pencil instead of an always-visible
@@ -2323,6 +2336,24 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .wo-status-edit-btn:not([hidden]) { display: inline-flex; width: 28px; height: 28px; }
   .wo-date-panel[hidden] { display: none; }
   .wo-date-panel:not([hidden]) { margin-top: 4px; width: 100%; }
+
+  /* Čas na poti: the add-row controls used the same 46px/16px inputs as
+     every other form field, which ate a disproportionate share of the
+     screen above the GERK list. Selects are shrunk the same way the
+     header's own date/status selects already are (see
+     .wo-header-fields .field-input above) — safe because a closed
+     <select> doesn't trigger iOS's input-zoom. The free-text opomba
+     input keeps its 16px font (shrinking that WOULD trigger zoom-on-
+     focus) but loses the extra vertical padding. */
+  #workLogForm .time-wrap .field-select {
+    height: 34px;
+    padding: 0 26px 0 10px;
+    font-size: .8125rem;
+  }
+  #workLogForm .time-wrap .time-min { padding-right: 22px; }
+  #workLogForm .road-comment-input { height: 38px; padding: 0 12px; }
+  #workLogForm .road-time-row { padding: 6px 10px; font-size: .75rem; }
+  #workLogForm .wlg-row { padding: 8px 10px; gap: 6px; }
 
   /* GERK pager: one .wlg-row fills the remaining height instead of a
      scrollable list — see updateGerkPaging() in app.js. The field
