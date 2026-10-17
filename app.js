@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.116';
+const APP_VERSION = 'v3.117';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -1424,7 +1424,7 @@ function renderSamplesSection(samples, gerkId) {
           </div>` : '';
   const hasFlagged = samples.some(s => isNoCollectComment(s.comment));
   return `
-        <button type="button" class="wlg-samples-toggle" data-action="wlg-samples-toggle">
+        <button type="button" class="wlg-samples-toggle" data-action="wlg-samples-toggle" data-count="${samples.length}">
           <span>${samples.length} ${samples.length === 1 ? 'segment' : 'segmentov'}</span>
           ${hasFlagged ? '<span class="wlg-sample-flag-dot" title="Vsaj en segment ima opombo »ne poberi«" aria-hidden="true"></span>' : ''}
           <span class="wlg-samples-chevron" aria-hidden="true">▾</span>
@@ -2470,13 +2470,41 @@ function cancelGerkEdit(btn) {
   btn.closest('.wlg-edit-panel').hidden = true;
 }
 
+// Phone-only label for the GERK/segments switch button — "N segmentov"
+// when showing the GERK view (tap to switch to segments), "← GERK" when
+// already showing segments (tap to switch back). Desktop never calls
+// this; its button always just reads "N segmentov" since there it's a
+// plain inline expand/collapse, not a view switch.
+function updateSamplesToggleLabel(btn, showingSegments) {
+  const label = btn.querySelector('span');
+  if (showingSegments) {
+    label.textContent = '← GERK';
+  } else {
+    const n = Number(btn.dataset.count);
+    label.textContent = `${n} ${n === 1 ? 'segment' : 'segmentov'}`;
+  }
+}
+
 function toggleGerkSamples(btn) {
-  const panel = btn.closest('.wlg-row').querySelector('.wlg-samples-panel');
+  const row = btn.closest('.wlg-row');
+  const panel = row.querySelector('.wlg-samples-panel');
+  // Phone: a full view switch (GERK info OR segments, never both at
+  // once — see the .wlg-row[data-mobile-view="segments"] rules in
+  // style.css) instead of expanding the segments table inline below
+  // the GERK info. Inline expansion could make a single row's card
+  // grow very tall, pushing the pager's own buttons off-screen and
+  // eating the room the map was cropped to free up. Desktop keeps the
+  // original inline expand/collapse untouched.
+  if (isMobile()) {
+    const showingSegments = row.dataset.mobileView !== 'segments';
+    row.dataset.mobileView = showingSegments ? 'segments' : 'gerk';
+    panel.hidden = !showingSegments;
+    btn.classList.toggle('wlg-samples-toggle--open', showingSegments);
+    updateSamplesToggleLabel(btn, showingSegments);
+    return;
+  }
   panel.hidden = !panel.hidden;
   btn.classList.toggle('wlg-samples-toggle--open', !panel.hidden);
-  // On phone the row (not the page) scrolls internally once expanded
-  // content no longer fits the card — without this nudge it's easy to
-  // open the panel and not realize it rendered just below the fold.
   if (!panel.hidden) panel.scrollIntoView({ block: 'nearest' });
 }
 

@@ -1872,8 +1872,8 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .wo-detail-map-wrap {
   position: relative;
-  height: 34vh; /* was 42vh — reduced ~20% for more room below on phone */
-  max-height: 300px; /* was 380px */
+  height: 22vh; /* was 34vh, before that 42vh — cropped further for more room below on phone (desktop overrides this at min-width:900px) */
+  max-height: 190px; /* was 300px, before that 380px */
   flex-shrink: 0;
 }
 
@@ -2400,6 +2400,41 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   #workLogForm .wo-gerk-field { gap: 4px; }
 
   #workLogForm .wlg-row { padding: 8px 10px; gap: 6px; }
+
+  /* GERK/Segments is a full switch on phone, not an inline expand — see
+     toggleGerkSamples() in app.js. Only one side is ever in the DOM's
+     visible flow at a time, so the card's height stays bounded to
+     whichever view is showing instead of growing by however many
+     segments exist on top of the GERK info, which was pushing the
+     pager's own buttons off-screen. */
+  #workLogForm .wlg-row[data-mobile-view="segments"] .wlg-info,
+  #workLogForm .wlg-row[data-mobile-view="segments"] .wlg-times,
+  #workLogForm .wlg-row[data-mobile-view="segments"] .wlg-edit-panel,
+  #workLogForm .wlg-row[data-mobile-view="segments"] .wlg-others {
+    display: none;
+  }
+  /* Styled as a real button, not the subtle inline link desktop uses —
+     this is now a full view switch rather than a small "expand"
+     affordance, so it needs the same visibility as any other button.
+     Scoped to #workLogForm — the create-order form has its own,
+     unrelated .wlg-samples-toggle (GERK paste preview) that must keep
+     its normal desktop-style look regardless of viewport width. */
+  #workLogForm .wlg-samples-toggle {
+    align-self: stretch;
+    justify-content: center;
+    margin-top: 4px;
+    padding: 8px 0;
+    background: var(--border-light);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: .8125rem;
+  }
+  #workLogForm .wlg-samples-toggle--open { background: var(--blue-800); border-color: var(--blue-800); color: #fff; }
+  /* State is conveyed by color + the "N segmentov"/"← GERK" label text
+     now, not rotation — the little chevron reads as clutter next to a
+     full-width button. */
+  #workLogForm .wlg-samples-chevron { display: none; }
 
   /* Map: the expand/collapse toggle is a desktop power-feature (swaps
      the GERK list for a compact code+segment view to give the map more
