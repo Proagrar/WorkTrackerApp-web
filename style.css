@@ -2440,7 +2440,20 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   }
   .wo-gerk-field > .field-label { grid-column: 1 / -1; }
   .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .wlg-table .wlg-row:not([hidden]) { flex: 1; min-height: 0; overflow-y: auto; }
+  /* -webkit-overflow-scrolling/overscroll-behavior: the segments table
+     (toggled open via "N segmentov") can push this row's content taller
+     than the card — without these, that extra content existed in the
+     DOM but iOS Safari's touch scrolling inside a nested flex/grid
+     scroll container is unreliable, so it read as "segments aren't
+     visible" even though expanding worked correctly. toggleGerkSamples()
+     also scrolls the panel into view on open so it's not left to guesswork. */
+  .wlg-table .wlg-row:not([hidden]) {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
   /* :not([hidden]) — updateGerkPaging() in app.js still decides whether
      this shows at all (hides it for a single-GERK order, desktop, or
      map-expanded mode); this just supplies its phone-only visual. */

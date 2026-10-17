@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.114';
+const APP_VERSION = 'v3.115';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -2474,6 +2474,10 @@ function toggleGerkSamples(btn) {
   const panel = btn.closest('.wlg-row').querySelector('.wlg-samples-panel');
   panel.hidden = !panel.hidden;
   btn.classList.toggle('wlg-samples-toggle--open', !panel.hidden);
+  // On phone the row (not the page) scrolls internally once expanded
+  // content no longer fits the card — without this nudge it's easy to
+  // open the panel and not realize it rendered just below the fold.
+  if (!panel.hidden) panel.scrollIntoView({ block: 'nearest' });
 }
 
 // Combines the modal's selected work_date with an <input type="time">
