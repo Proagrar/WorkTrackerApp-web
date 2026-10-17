@@ -256,6 +256,12 @@ input, select, textarea { font-family: inherit; }
   white-space: nowrap;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  /* Without this, a tap that lands just outside a button's actual box
+     (easy on a small target) can read to iOS Safari as an ambiguous
+     double-tap and zoom the page into that spot instead of just
+     missing the button — this tells it every tap here is a deliberate
+     single action, never a zoom gesture. Doesn't touch pinch-zoom. */
+  touch-action: manipulation;
 }
 
 .btn:active { transform: scale(.97); }
@@ -2422,38 +2428,38 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     display: none;
   }
 
-  /* GERK pager: one .wlg-row fills the remaining height instead of a
-     scrollable list — see updateGerkPaging() in app.js. The field is a
-     2-row grid (label on its own row; table + pager sharing the row
-     below, side by side) instead of a plain flex column, so the pager
-     gets its own real column — a fixed-width strip running the full
-     card height — rather than floating over the card's content, which
-     either needed huge asymmetric padding on every row (wasting space
-     on rows the pager doesn't visually reach) or overlapped text. */
+  /* GERK pager: the field is a 2-row grid (label on its own row; table
+     + pager sharing the row below, side by side) so the pager gets its
+     own real column instead of floating over the card's content — see
+     updateGerkPaging() in app.js for the show/hide logic.
+
+     The visible .wlg-row is NOT forced into a fixed-height, internally
+     -scrolling box here (an earlier version did that with flex:1 +
+     min-height:0 + overflow-y:auto on the row) — real iPhones couldn't
+     reliably reach content past the fold inside that nested flex/grid
+     scroll container via touch, even though toggling "N segmentov"
+     correctly un-hid it and it was provably present in the DOM. Rows
+     now size to their natural content height instead, same as every
+     other scrollable form in this app: when a row (or its expanded
+     segments panel) is taller than the screen, the already-reliable
+     outer scroll — #workLogForm.wo-detail-content's own overflow-y:auto,
+     unchanged from before this whole redesign — reaches it. */
   .wo-gerk-field {
     flex: 1;
-    min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto;
     column-gap: 8px;
   }
   .wo-gerk-field > .field-label { grid-column: 1 / -1; }
-  .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  /* -webkit-overflow-scrolling/overscroll-behavior: the segments table
-     (toggled open via "N segmentov") can push this row's content taller
-     than the card — without these, that extra content existed in the
-     DOM but iOS Safari's touch scrolling inside a nested flex/grid
-     scroll container is unreliable, so it read as "segments aren't
-     visible" even though expanding worked correctly. toggleGerkSamples()
-     also scrolls the panel into view on open so it's not left to guesswork. */
-  .wlg-table .wlg-row:not([hidden]) {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-  }
+  .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; }
+  /* A floor, not a cap: keeps the card looking generously sized even
+     when a GERK's own content is short (just Start/Konec, nothing
+     expanded) — dvh so it tracks the real viewport on iOS Safari
+     (whose address bar collapsing a plain vh doesn't account for).
+     Content taller than this simply grows past it; nothing here clips
+     or forces a second, nested scroll container. */
+  .wlg-table .wlg-row:not([hidden]) { min-height: 42dvh; }
   /* :not([hidden]) — updateGerkPaging() in app.js still decides whether
      this shows at all (hides it for a single-GERK order, desktop, or
      map-expanded mode); this just supplies its phone-only visual. */
@@ -2464,13 +2470,22 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    width: 44px;
-    background: var(--border-light);
+    gap: 10px;
+    width: 46px;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 14px;
     padding: 8px 0;
   }
-  .wo-gerk-pager:not([hidden]) .btn-icon { width: 32px; height: 32px; }
+  /* Solid color instead of the pale grey every other .btn-icon uses —
+     at the old grey-on-grey (the pill itself is also var(--border-light))
+     the buttons were barely distinguishable from their own background. */
+  .wo-gerk-pager:not([hidden]) .btn-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--blue-800);
+    color: #fff;
+  }
   .wo-gerk-pager-label { font-size: .75rem; font-weight: 700; color: var(--text-secondary); }
 }
 
