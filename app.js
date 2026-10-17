@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.119';
+const APP_VERSION = 'v3.120';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -1142,6 +1142,15 @@ function isNoCollectComment(comment) {
   return norm === 'ne' || norm === 'ne pobereš' || norm === 'ne poberes';
 }
 
+// Same "don't collect" signal, but from the Vzorčenje field itself
+// (sampling_note — a controlled SAMPLE_ACTIONS value, "ne pobereš" being
+// one of them) rather than the free-text Opomba comment. Either one
+// flags the segment — a sampler marking it via Vzorčenje is just as
+// real a "skip this one" as writing it in the comment.
+function isNoCollectSample(s) {
+  return isNoCollectComment(s.comment) || s.sampling_note === 'ne pobereš';
+}
+
 function renderSampleCommentCell(s) {
   const flagClass = isNoCollectComment(s.comment) ? ' wlg-comment-input--flagged' : '';
   return `<input type="text" class="sample-field-input wlg-comment-input${flagClass}" data-sample-id="${escHtml(s.id)}" value="${escHtml(s.comment || '')}" maxlength="200">`;
@@ -1422,11 +1431,11 @@ function renderSamplesSection(samples, gerkId) {
               <button type="button" class="btn btn-secondary btn-sm" data-action="wlg-add-sample-cancel">Prekliči</button>
             </div>
           </div>` : '';
-  const hasFlagged = samples.some(s => isNoCollectComment(s.comment));
+  const hasFlagged = samples.some(isNoCollectSample);
   return `
         <button type="button" class="wlg-samples-toggle" data-action="wlg-samples-toggle" data-count="${samples.length}">
           <span>${samples.length} ${samples.length === 1 ? 'segment' : 'segmentov'}</span>
-          ${hasFlagged ? '<span class="wlg-sample-flag-dot" title="Vsaj en segment ima opombo »ne poberi«" aria-hidden="true"></span>' : ''}
+          ${hasFlagged ? '<span class="wlg-sample-flag-dot" title="Vsaj en segment je označen »ne poberi«" aria-hidden="true"></span>' : ''}
           <span class="wlg-samples-chevron" aria-hidden="true">▾</span>
         </button>
         <div class="wlg-samples-panel" hidden>
@@ -1434,7 +1443,7 @@ function renderSamplesSection(samples, gerkId) {
             <thead><tr><th>Št. segmenta</th><th>Vzorčenje</th><th>Globina</th><th>Opomba</th>${isAdminView() ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${samples.map(s => `
-                <tr class="${isNoCollectComment(s.comment) ? 'wlg-sample-row--flagged' : ''}">
+                <tr class="${isNoCollectSample(s) ? 'wlg-sample-row--flagged' : ''}">
                   <td>${renderSampleNoCell(s)}</td>
                   <td>${renderSamplingCell(s)}</td>
                   <td>${renderSampleDepthCell(s)}</td>
@@ -3350,6 +3359,24 @@ async function updateSampleNo(inputEl) {
   }
 }
 
+// Re-derives the GERK row's toggle-button dot from whatever rows are
+// currently marked .wlg-sample-row--flagged in its table — called after
+// either updateSampleComment() or updateSampleVzorcenje() patches one
+// row's class, so a row flagged via the OTHER field (comment vs.
+// Vzorčenje) isn't lost when this one field's value changes.
+function refreshGerkFlagDot(wlgRow) {
+  if (!wlgRow) return;
+  const toggleBtn = wlgRow.querySelector('.wlg-samples-toggle');
+  if (!toggleBtn) return;
+  const anyFlagged = !!wlgRow.querySelector('.wlg-sample-row--flagged');
+  const existingDot = toggleBtn.querySelector('.wlg-sample-flag-dot');
+  if (anyFlagged && !existingDot) {
+    toggleBtn.querySelector('.wlg-samples-chevron').insertAdjacentHTML('beforebegin', '<span class="wlg-sample-flag-dot" title="Vsaj en segment je označen »ne poberi«" aria-hidden="true"></span>');
+  } else if (!anyFlagged && existingDot) {
+    existingDot.remove();
+  }
+}
+
 async function updateSampleComment(inputEl) {
   const sampleId = inputEl.dataset.sampleId;
   const value = inputEl.value.trim();
@@ -3366,19 +3393,14 @@ async function updateSampleComment(inputEl) {
 
     // Red flag updates live — no full re-render on every keystroke-save,
     // so this input/row/toggle-dot are patched directly instead of
-    // waiting for the next loadDetailForDate().
-    const flagged = isNoCollectComment(value);
-    inputEl.classList.toggle('wlg-comment-input--flagged', flagged);
+    // waiting for the next loadDetailForDate(). Row flag uses the
+    // combined check (comment OR Vzorčenje), not just this field, since
+    // the row might already be flagged via Vzorčenje regardless of what
+    // the comment says.
+    const flagged = sample ? isNoCollectSample(sample) : isNoCollectComment(value);
+    inputEl.classList.toggle('wlg-comment-input--flagged', isNoCollectComment(value));
     inputEl.closest('tr')?.classList.toggle('wlg-sample-row--flagged', flagged);
-    const wlgRow = inputEl.closest('.wlg-row');
-    const toggleBtn = wlgRow?.querySelector('.wlg-samples-toggle');
-    if (toggleBtn && !toggleBtn.querySelector('.wlg-sample-flag-dot')) {
-      const anyFlagged = Array.from(wlgRow.querySelectorAll('.wlg-comment-input')).some(el => el.classList.contains('wlg-comment-input--flagged'));
-      if (anyFlagged) toggleBtn.querySelector('.wlg-samples-chevron').insertAdjacentHTML('beforebegin', '<span class="wlg-sample-flag-dot" title="Vsaj en segment ima opombo »ne poberi«" aria-hidden="true"></span>');
-    } else if (toggleBtn && !flagged) {
-      const anyFlagged = Array.from(wlgRow.querySelectorAll('.wlg-comment-input')).some(el => el.classList.contains('wlg-comment-input--flagged'));
-      if (!anyFlagged) toggleBtn.querySelector('.wlg-sample-flag-dot')?.remove();
-    }
+    refreshGerkFlagDot(inputEl.closest('.wlg-row'));
   } catch (e) {
     showFormError(e.message || 'Napaka pri shranjevanju.');
     if (sample) inputEl.value = sample.comment || '';
@@ -3399,6 +3421,12 @@ async function updateSampleVzorcenje(selectEl) {
     const { error } = await supabase.from('delovni_nalogi_vzorci').update({ sampling_note: value }).eq('id', sampleId);
     if (error) throw error;
     if (sample) sample.sampling_note = value;
+
+    // Same live red-flag patch as updateSampleComment() — "ne pobereš"
+    // picked here flags the row just as much as writing it in Opomba.
+    const flagged = sample ? isNoCollectSample(sample) : value === 'ne pobereš';
+    selectEl.closest('tr')?.classList.toggle('wlg-sample-row--flagged', flagged);
+    refreshGerkFlagDot(selectEl.closest('.wlg-row'));
   } catch (e) {
     showFormError(e.message || 'Napaka pri shranjevanju.');
     if (sample) selectEl.value = sample.sampling_note || '';
