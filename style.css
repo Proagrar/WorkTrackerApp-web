@@ -2435,6 +2435,22 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
      now, not rotation — the little chevron reads as clutter next to a
      full-width button. */
   #workLogForm .wlg-samples-chevron { display: none; }
+  /* Caps the segments table at ~6 rows before it scrolls internally,
+     instead of letting the card (and the pager stretched to match its
+     height) grow without bound for an order with many segments. A
+     fixed px figure, not a vh/dvh one — unlike the map or the card's
+     old min-height, row height here is font/padding-driven, not
+     viewport-driven, so this stays "about 6 rows" on any phone size.
+     A plain max-height + overflow-y here (not flex-grow + min-height:0
+     the way the whole card briefly tried) is what actually scrolls
+     reliably on iOS — see the removed min-height:42dvh floor's own
+     comment for that history. */
+  #workLogForm .wlg-samples-panel {
+    max-height: 215px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
 
   /* Map: the expand/collapse toggle is a desktop power-feature (swaps
      the GERK list for a compact code+segment view to give the map more
