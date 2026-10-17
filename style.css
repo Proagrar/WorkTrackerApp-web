@@ -1872,8 +1872,8 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 
 .wo-detail-map-wrap {
   position: relative;
-  height: 22vh; /* was 34vh, before that 42vh — cropped further for more room below on phone (desktop overrides this at min-width:900px) */
-  max-height: 190px; /* was 300px, before that 380px */
+  height: 27vh; /* was 22vh — grown back ~20% once the GERK card below no longer needed the extra room (desktop overrides this at min-width:900px) */
+  max-height: 230px; /* was 190px */
   flex-shrink: 0;
 }
 
@@ -2485,16 +2485,26 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto;
     column-gap: 8px;
+    /* Without this, the grid's default align-content (stretch) spreads
+       any leftover height — whenever the GERK info is shorter than the
+       flex-allocated space — into BOTH "auto" rows, inflating the
+       label's own row into a tall gap above the card and padding the
+       card out at the bottom. start packs both rows to their real
+       content size and leaves any extra space below row 2, where it
+       just reads as (harmless) blank space instead of a stretched gap. */
+    align-content: start;
   }
   .wo-gerk-field > .field-label { grid-column: 1 / -1; }
   .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; }
-  /* A floor, not a cap: keeps the card looking generously sized even
-     when a GERK's own content is short (just Start/Konec, nothing
-     expanded) — dvh so it tracks the real viewport on iOS Safari
-     (whose address bar collapsing a plain vh doesn't account for).
-     Content taller than this simply grows past it; nothing here clips
-     or forces a second, nested scroll container. */
-  .wlg-table .wlg-row:not([hidden]) { min-height: 42dvh; }
+  /* No forced min-height here (an earlier version used one, ~42dvh, to
+     keep the card looking tall even with sparse content) — on top of
+     the header/Čas na poti/map/opomba already above it, that floor
+     pushed the card's own bottom (and the pager's buttons) past the
+     visible viewport, requiring a scroll just to reach the end of the
+     card. Sized to its actual content instead, so the whole GERKI
+     section reliably fits on screen without scrolling in the common
+     case; a genuinely long segments table still simply grows past the
+     fold, same as any other content on this page. */
   /* :not([hidden]) — updateGerkPaging() in app.js still decides whether
      this shows at all (hides it for a single-GERK order, desktop, or
      map-expanded mode); this just supplies its phone-only visual. */
