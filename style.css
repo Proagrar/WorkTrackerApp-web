@@ -827,6 +827,15 @@ input, select, textarea { font-family: inherit; }
   visibility: visible;
   transition: opacity var(--duration-base) var(--ease-standard), visibility 0s linear 0s;
 }
+/* The main list's selection bar sits at the same fixed position as the
+   GERK-level one inside the work-order detail modal — when a row stayed
+   selected on the list behind an open order, both rendered stacked on top
+   of each other. The list is covered by the modal anyway, so its bar has
+   no reason to show while the modal is open. */
+#formModal:not([hidden]) ~ #woSelectionBar {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
 
 .wlg-sel-summary {
   font-size: .8125rem;
@@ -1135,7 +1144,22 @@ input, select, textarea { font-family: inherit; }
   color: var(--text-primary);
 }
 
-.wlg-import-zones { margin-top: 8px; margin-bottom: 8px; }
+.wlg-gerk-label-row { display: flex; align-items: center; gap: 8px; }
+.wlg-select-all-label { display: flex; align-items: center; cursor: pointer; }
+
+/* Both ways to add more GERKs to an existing order, grouped at the end of
+   the GERK list: the shared paste textarea on top, both trigger buttons
+   side by side in a row below it instead of each sitting in its own
+   column (which left the KML button oddly offset from "+ Dodaj GERK-e"). */
+.wlg-gerk-add-buttons-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.wlg-import-zones { margin: 0; }
 
 .wlg-import-zones-form {
   display: flex;
@@ -1961,11 +1985,21 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   transition: opacity var(--duration-base) var(--ease-standard), visibility 0s linear 0s;
 }
 
-.wo-map-expand-btn {
+/* Groups the expand + layers-toggle buttons in the detail map's top-left
+   corner so their vertical order comes from flex layout, not a second
+   button's top offset guessed to clear the first one's rendered height. */
+.wo-map-top-left-controls {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 13px;
+  left: 58px;
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wo-map-expand-btn {
   padding: 5px 10px;
   border: none;
   border-radius: 20px;
@@ -1982,11 +2016,10 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 /* Toggles the roads/borders/place-names overlay on top of the satellite
    imagery — off by default (satellite detail matters more here, see
    ensureWoMap's own comment), same pill styling as .wo-map-expand-btn.
-   --detail sits just below the expand button (which already occupies
-   top:8px there); --overview has that top-left slot to itself. */
+   --detail is a plain flex child of .wo-map-top-left-controls (position
+   left unset → static); --overview isn't in that wrapper, so it still
+   positions itself. */
 .wo-map-layers-btn {
-  position: absolute;
-  left: 8px;
   z-index: 1000;
   padding: 5px 10px;
   border: none;
@@ -2004,7 +2037,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .wo-map-layers-btn[aria-pressed="true"]:hover { background: var(--blue-800); }
 /* left:54px clears Leaflet's zoom +/- control (10px margin + 34px wide)
    in the same top-left corner — at left:8px the two overlapped. */
-.wo-map-layers-btn--overview { top: 10px; left: 54px; }
+.wo-map-layers-btn--overview { position: absolute; top: 10px; left: 54px; }
 
 /* Close (✕) in the overview map's top-right corner — same action as the
    "Skrij zemljevid" toolbar button, so the map can be closed without
@@ -2027,8 +2060,6 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   cursor: pointer;
 }
 .wo-map-close-btn:hover { background: #fff; }
-.wo-map-layers-btn--detail { top: 44px; }
-
 /* Expanded map mode — the button toggles this class on .wo-detail-layout.
    Width only, never height — height stays whatever the normal (non-
    expanded) sizing already gives it (fixed on mobile, stretch-to-
@@ -2461,7 +2492,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
      of this exact button already uses to clear the same zoom control
      (see .wo-map-layers-btn--overview above). */
   #woMapExpandBtn { display: none; }
-  .wo-map-layers-btn--detail { top: 10px; left: 54px; }
+  .wo-map-top-left-controls { top: 10px; left: 54px; }
   /* The Leaflet/Esri attribution strip along the bottom edge — not
      worth the vertical space it eats on a phone-width map. */
   #woDetailMap .leaflet-control-attribution { display: none; }
@@ -2570,6 +2601,17 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
    phone screen once there's real width to work with. */
 @media (min-width: 900px) {
   .app-main { max-width: 1100px; }
+  /* Gnojilni načrt's tables (plans, lab results with 12 columns, settings)
+     need the whole screen; the other tabs keep the 1100px column
+     (Matej, 2026-10-30). */
+  .app-main:has(#panelGnojilni:not([hidden])) { max-width: none; }
+  /* …but the tab buttons stay exactly where the 1100px column puts them on
+     every other tab (Matej, 2026-10-30). The bar itself stays full width so
+     its sticky background still covers content scrolling under it. */
+  .app-main:has(#panelGnojilni:not([hidden])) .tab-bar {
+    padding-left: max(16px, calc((100% - 1100px) / 2 + 16px));
+    padding-right: max(16px, calc((100% - 1100px) / 2 + 16px));
+  }
 
   .tab-bar { justify-content: flex-start; }
   .tab-btn { flex: 0 0 auto; min-width: 180px; }
@@ -3197,3 +3239,237 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .calendar-day { min-height: 92px; padding: 5px; }
   .calendar-order { padding: 4px 20px 4px 4px; }
 }
+
+/* ── Gnojilni načrt (fertilization.js) ─────────────────────── */
+.fert-head { flex-wrap: wrap; gap: var(--space-5); }
+.fert-subnav { display: inline-flex; gap: var(--space-1); padding: var(--space-1); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.fert-subnav-btn { height: 36px; padding: 0 var(--space-7); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-size: .875rem; font-weight: 600; }
+.fert-subnav-btn:hover { background: var(--border-light); }
+.fert-subnav-btn--active, .fert-subnav-btn--active:hover { background: var(--blue-100); color: var(--blue-800); font-weight: 700; }
+.fert-head-actions { display: flex; gap: var(--space-3); }
+
+.fert-view { display: flex; flex-direction: column; gap: var(--space-5); padding-bottom: var(--space-9); }
+.fert-view[hidden] { display: none; }
+.fert-title { margin: 0; }
+.fert-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.fert-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 240px; }
+.fert-input { height: 40px; }
+.fert-check { display: inline-flex; align-items: center; gap: var(--space-3); height: 40px; padding: 0 var(--space-5); background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius-md); font-size: .875rem; }
+
+.fert-notice { padding: var(--space-4) var(--space-6); border-radius: var(--radius-sm); font-size: .875rem; line-height: 1.45; }
+.fert-notice + .fert-notice { margin-top: var(--space-3); }
+.fert-notice--info { background: var(--blue-50); color: var(--blue-800); }
+.fert-notice--warn { background: var(--warning-bg); color: var(--warning); }
+.fert-notice--ok   { background: var(--success-bg); color: #15803D; }
+
+.fert-table td.fert-num, .fert-table th.fert-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fert-table--compact th, .fert-table--compact td { padding: 7px 12px; }
+.fert-strong { font-weight: 600; }
+.fert-muted { color: var(--text-secondary); }
+.fert-hint { margin: 0; font-size: .8125rem; color: var(--text-secondary); }
+.fert-empty { text-align: center; color: var(--text-secondary); padding: var(--space-9) !important; }
+.fert-error { color: var(--error); }
+.fert-warn-text { color: var(--warning); font-weight: 600; }
+.fert-state { display: flex; align-items: center; gap: var(--space-3); }
+.fert-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.fert-badge--ok   { background: var(--success-bg); color: #15803D; }
+.fert-badge--warn { background: var(--warning-bg); color: var(--warning); }
+.fert-link-btn { height: 30px; padding: 0 10px; }
+.fert-pick-list { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); white-space: normal; }
+
+.fert-dropzone { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-9); background: var(--surface); border: 2px dashed var(--border); border-radius: var(--radius-lg); text-align: center; }
+.fert-dropzone--over { border-color: var(--blue-800); background: var(--blue-50); }
+.fert-dropzone-title { font-size: 1rem; font-weight: 700; }
+.fert-dropzone-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); margin-top: var(--space-3); }
+.fert-dropzone-actions .btn { cursor: pointer; }
+
+.fert-card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-7) var(--space-8); background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); min-width: 0; }
+.fert-card-title { margin: 0; font-size: .9375rem; font-weight: 700; }
+.fert-file { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); padding: var(--space-5) var(--space-6); border: 1px solid var(--border-light); border-radius: var(--radius-sm); }
+.fert-file--skip { background: var(--background); color: var(--text-secondary); }
+.fert-file-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--success-bg); color: #15803D; font-weight: 700; flex: 0 0 auto; }
+.fert-file--skip .fert-file-icon { background: var(--border); color: var(--text-secondary); }
+.fert-file-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 280px; min-width: 0; word-break: break-word; }
+.fert-file-counts { display: flex; flex-wrap: wrap; gap: var(--space-5); font-size: .8125rem; font-weight: 600; }
+.fert-count--ok { color: #15803D; }
+.fert-count--warn { color: var(--warning); }
+.fert-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-4); }
+
+.fert-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-7); align-items: start; }
+.fert-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: var(--space-2); }
+.fert-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: var(--space-2); background: var(--background); border-radius: var(--radius-sm); font-size: .8125rem; }
+@media (max-width: 420px) { .fert-settings-grid { grid-template-columns: 1fr; } .fert-field { min-width: 0; flex: 1 1 100%; } }
+/* Admins now get four tabs (Nalogi, Evidenca, Planiranje, Gnojilni načrt) —
+   on a phone let them wrap into two rows instead of squeezing four labels
+   into one; operators' two tabs still sit side by side. */
+@media (max-width: 520px) { .tab-bar { flex-wrap: wrap; } .tab-btn { flex: 1 1 40%; } }
+/* Analize tal: sortable column headers — same look/behavior as the work-order list's .wo-th buttons */
+#fertLabHead th { padding: 0; }
+/* Analize tal: fit the screen width instead of scrolling sideways (Matej,
+   2026-10-30) — names/GERK codes wrap, file names cut with …, tighter cells */
+.fert-lab-table { width: 100%; }
+.fert-lab-table td, .fert-lab-table .fert-sort-btn { padding: 8px 10px; }
+.fert-lab-table td.fert-wrap { white-space: normal; overflow-wrap: anywhere; min-width: 80px; max-width: 200px; }
+.fert-lab-table td.fert-ellipsis { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.fert-lab-table .fert-row-actions { gap: 6px; align-items: center; }
+.fert-badge--mini { margin-left: 4px; padding: 1px 6px; font-size: .625rem; vertical-align: 1px; }
+.fert-sort-btn { display: block; width: 100%; padding: 10px 14px; border: 0; background: transparent; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; text-align: inherit; white-space: nowrap; cursor: pointer; }
+.fert-sort-btn:hover, .fert-sort-btn:focus-visible, .fert-sort-btn--active { color: var(--blue-800); }
+
+/* ── Gnojilni načrt: plan list + wizard ───────────────────── */
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover:not(:disabled) { background: #15803D; }
+.fert-field--narrow { min-width: 160px; flex: 0 1 200px; }
+.fert-field--wide { flex: 1 1 320px; }
+.fert-field--full { min-width: 0; width: 100%; }
+.fert-row-actions { display: flex; gap: var(--space-2); }
+.fert-row-actions .btn { height: 30px; padding: 0 10px; }
+.fert-danger-text { color: var(--danger); }
+.fert-spacer { flex: 1 1 auto; }
+.fert-center { text-align: center !important; }
+.fert-col-sep { border-left: 1px solid var(--border-light); }
+.fert-total-row td { font-weight: 700; border-top: 2px solid var(--border) !important; }
+.fert-subtotal-row td { font-weight: 600; background: var(--background); }
+.fert-row--selected td { background: var(--blue-50); }
+.fert-row--off td { color: var(--text-muted); }
+.fert-list { margin: var(--space-2) 0 0; padding-left: 18px; }
+.fert-value { font-size: .9375rem; font-weight: 600; padding-top: var(--space-3); }
+
+.fert-wiz-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
+.fert-stepper { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.fert-step { display: inline-flex; align-items: center; gap: var(--space-3); min-height: 44px; padding: 0 var(--space-6) 0 var(--space-3); border: 1.5px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-secondary); font-size: .8125rem; font-weight: 600; }
+.fert-step:disabled { opacity: .55; cursor: default; }
+.fert-step-num { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--border-light); font-weight: 700; flex: 0 0 auto; }
+.fert-step--done { color: var(--blue-800); border-color: var(--blue-100); }
+.fert-step--done .fert-step-num { background: var(--blue-100); color: var(--blue-800); }
+.fert-step--current { background: var(--blue-800); border-color: var(--blue-800); color: #fff; }
+.fert-step--current .fert-step-num { background: #fff; color: var(--blue-800); }
+.fert-wiz-body { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+.fert-wiz-nav { position: sticky; bottom: 0; padding: var(--space-5) 0; background: var(--background); border-top: 1px solid var(--border-light); z-index: 2; }
+
+.fert-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
+.fert-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-5); align-items: start; }
+.fert-form-grid .fert-field { min-width: 0; }
+/* Kultura type-to-search picker */
+.fert-combo { position: relative; }
+.fert-combo-list { position: absolute; z-index: 30; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); }
+.fert-combo-opt { padding: 8px 10px; border-radius: var(--radius-sm); font-size: .9375rem; line-height: 1.3; cursor: pointer; }
+.fert-combo-opt:hover, .fert-combo-opt--active { background: var(--blue-50); }
+.fert-combo-opt--current { font-weight: 600; color: var(--blue-800); }
+.fert-combo-empty { padding: 8px 10px; font-size: .875rem; color: var(--text-secondary); }
+/* one-line labels keep the inputs of a row level */
+.fert-form-grid .field-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fert-input--num { width: 110px; text-align: right; font-variant-numeric: tabular-nums; }
+.fert-textarea { height: auto; padding: var(--space-4) var(--space-6); white-space: pre-wrap; font-family: inherit; resize: vertical; }
+.fert-dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-3) var(--space-7); margin: 0; }
+.fert-dl dt { color: var(--text-secondary); font-size: .8125rem; font-weight: 600; }
+.fert-dl dd { margin: 0; font-weight: 600; }
+
+.fert-seg { display: inline-flex; gap: 3px; padding: 3px; background: var(--background); border: 1.5px solid var(--border); border-radius: var(--radius-md); }
+.fert-seg-btn { min-height: 36px; padding: 0 var(--space-6); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-size: .875rem; font-weight: 600; }
+.fert-seg-btn--on { background: var(--surface); color: var(--blue-800); font-weight: 700; box-shadow: var(--shadow-sm); }
+.fert-seg-btn:disabled { cursor: default; }
+
+.fert-org-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border-light); border-radius: var(--radius-sm); }
+.fert-org-row > select { width: auto; flex: 0 1 260px; }
+.fert-inline { display: inline-flex; align-items: center; gap: var(--space-3); font-size: .8125rem; color: var(--text-secondary); }
+.fert-org-total { flex: 1 1 200px; text-align: right; font-size: .8125rem; }
+.fert-actions--start { justify-content: flex-start; align-items: center; }
+
+.fert-param-group + .fert-param-group { margin-top: var(--space-7); padding-top: var(--space-7); border-top: 1px solid var(--border-light); }
+.fert-group-title { margin: 0 0 var(--space-4); font-size: .8125rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+.fert-param-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.fert-param--changed .fert-input, .fert-tile.fert-param--changed { border-color: #D97706; background: var(--warning-bg); }
+.fert-changed { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--warning-bg); color: var(--warning); font-size: .6875rem; font-weight: 700; text-transform: none; letter-spacing: 0; }
+.fert-reset { width: 32px; height: 32px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--warning); font-size: 1rem; line-height: 1; }
+.fert-reset:hover { background: var(--warning-bg); }
+.fert-details summary { cursor: pointer; }
+.fert-details[open] summary { margin-bottom: var(--space-5); }
+.fert-tiles--inputs { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); margin-bottom: var(--space-7); }
+.fert-tile--input { border: 1.5px solid transparent; }
+.fert-tile--input .fert-input--num { width: 100%; height: 34px; padding: 0 8px; font-size: .875rem; }
+
+@media (max-width: 640px) {
+  .fert-step-label { display: none; }
+  .fert-step { padding: 0 var(--space-3); }
+  .fert-step--current .fert-step-label { display: inline; }
+  .fert-org-total { text-align: left; }
+}
+
+/* ── Gnojilni načrt: Nastavitve editor (view → edit → review & confirm) ── */
+.fert-set-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); margin-bottom: var(--space-5); padding: var(--space-4) var(--space-6); background: var(--surface); border: 1px solid var(--border-light); border-radius: var(--radius-md); }
+.fert-set-bar .fert-hint { margin: 0; }
+.fert-set-bar--editing { position: sticky; top: 0; z-index: 15; border-color: #F59E0B; background: var(--warning-bg); box-shadow: var(--shadow-sm); }
+.fert-set-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--space-7); align-items: start; min-width: 0; margin: 0; padding: 0; border: 0; }
+.fert-set-wide { grid-column: 1 / -1; }
+.fert-set-body > .fert-card { min-width: 0; }
+.fert-set-review { margin-bottom: var(--space-5); border: 2px solid var(--blue-800); }
+.fert-set-table { width: 100%; }
+.fert-set-table td, .fert-set-table th { padding: 6px 8px; }
+.fert-input--sm { height: 34px; padding: 0 8px; font-size: .8125rem; }
+.fert-set-table .fert-input--num { width: 84px; }
+.fert-set-table .fert-input--code { width: 60px; }
+.fert-input--text { width: 100%; min-width: 150px; }
+.fert-set-changed, .fert-set-table input[type="checkbox"].fert-set-changed { border-color: #D97706 !important; background: var(--warning-bg) !important; outline: 2px solid #F59E0B; outline-offset: 1px; }
+.fert-set-new td { background: var(--blue-50); }
+.fert-set-body:disabled .fert-input { background: var(--background); color: var(--text-primary); opacity: 1; -webkit-text-fill-color: var(--text-primary); }
+.fert-set-body .fert-crop-search { max-width: 280px; margin-left: auto; }
+@media (max-width: 520px) { .fert-set-body { grid-template-columns: 1fr; } }
+
+/* Nastavitve, compact (Matej, 2026-10-30: "minimize everything, smaller
+   text"). Desktop only — on phones inputs keep 16px, below that iOS Safari
+   zooms the page on every focus. */
+@media (min-width: 640px) {
+  #fertSettingsBody { font-size: .8125rem; }
+  #fertSettingsBody .fert-set-bar { margin-bottom: var(--space-3); padding: 6px var(--space-5); gap: var(--space-3); }
+  #fertSettingsBody .fert-set-body { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-4); }
+  #fertSettingsBody .fert-card { gap: var(--space-2); padding: var(--space-4) var(--space-5); border-radius: var(--radius-sm); }
+  #fertSettingsBody .fert-card-title { font-size: .8125rem; }
+  #fertSettingsBody .fert-card-head { gap: var(--space-3); }
+  #fertSettingsBody .fert-group-title { margin: 0 0 4px; font-size: .625rem; }
+  #fertSettingsBody .fert-hint { font-size: .6875rem; line-height: 1.3; }
+  #fertSettingsBody .field-label { font-size: .625rem; letter-spacing: .01em; }
+  #fertSettingsBody .field-input { height: 28px; padding: 0 7px; font-size: .8125rem; border-width: 1px; border-radius: var(--radius-sm); }
+  #fertSettingsBody select.field-input { padding-right: 20px; }
+  #fertSettingsBody .btn-sm { height: 28px; padding: 0 10px; font-size: .75rem; }
+  /* parameter groups side by side instead of stacked */
+  #fertSettingsBody .fert-set-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--space-3) var(--space-6); }
+  #fertSettingsBody .fert-set-groups .fert-param-group { margin: 0; padding: 0; border: 0; }
+  #fertSettingsBody .fert-form-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 4px var(--space-3); }
+  #fertSettingsBody .fert-set-groups .fert-param-group:last-child .fert-form-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  #fertSettingsBody .fert-field { gap: 2px; }
+  /* tables */
+  #fertSettingsBody .fert-set-table { font-size: .75rem; }
+  #fertSettingsBody .fert-set-table th { padding: 4px 5px; font-size: .5625rem; }
+  #fertSettingsBody .fert-set-table td { padding: 2px 5px; }
+  #fertSettingsBody .fert-input--sm { height: 24px; padding: 0 5px; font-size: .75rem; }
+  #fertSettingsBody .fert-set-table .fert-input--num { width: 60px; }
+  #fertSettingsBody .fert-set-table .fert-input--code { width: 44px; }
+  #fertSettingsBody .fert-input--text { min-width: 120px; }
+  #fertSettingsBody .fert-set-table input[type="checkbox"] { width: 14px; height: 14px; }
+  /* lime + factor tiles */
+  #fertSettingsBody .fert-tiles--inputs { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 3px; margin-bottom: var(--space-2); }
+  #fertSettingsBody .fert-tile { padding: 2px 3px; gap: 1px; font-size: .6875rem; }
+  #fertSettingsBody .fert-tile--input .fert-input--num { height: 22px; padding: 0 4px; font-size: .75rem; text-align: center; }
+  #fertSettingsBody .fert-crop-search { height: 26px; max-width: 220px; }
+  #fertSettingsBody .fert-set-review .fert-list { font-size: .75rem; }
+}
+/* 69 crops: own scroll area with a sticky header instead of a 2000px card */
+#fertSettingsBody .fert-set-crops .reports-table-wrap { max-height: 55vh; overflow: auto; }
+#fertSettingsBody .fert-set-crops thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+/* v4.21: in the compact grid the 110px .fert-input--num was wider than its
+   ~80px cell — inputs overlapped and cut the values ("12" for 120). Fill the
+   cell instead; labels may take two lines, all reserving the same height so
+   the inputs of a row stay level. */
+@media (min-width: 640px) {
+  #fertSettingsBody .fert-form-grid .fert-input--num { width: 100%; min-width: 0; }
+  #fertSettingsBody .fert-form-grid .field-label { display: flex; align-items: flex-end; min-height: 2.5em; line-height: 1.25; white-space: normal; overflow: visible; text-overflow: clip; }
+  #fertSettingsBody .fert-set-groups { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+}
+
+/* Poročila: "Brez »ne pobereš«" — which ha the rates divide by */
+.reports-check { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .02em; flex-shrink: 0; cursor: pointer; }
+.reports-check input { width: 16px; height: 16px; accent-color: var(--blue-800); }
+.reports-check:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+/* the ha column the rates currently use */
+.reports-data-table th.reports-col--base { color: var(--blue-800); box-shadow: inset 0 -2px 0 var(--blue-800); }

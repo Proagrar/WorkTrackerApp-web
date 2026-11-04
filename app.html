@@ -54,6 +54,8 @@
       <button id="tabEvidenca" class="tab-btn" data-tab="evidenca">Evidenca dela</button>
       <!-- Admin-only, like the FAB — see updateFabVisibility() in app.js. -->
       <button id="tabPlaniranje" class="tab-btn" data-tab="planiranje" hidden>Planiranje</button>
+      <!-- Admin-only too — same gate as Planiranje (updateFabVisibility()). -->
+      <button id="tabGnojilni" class="tab-btn" data-tab="gnojilni" hidden>Gnojilni načrt</button>
     </nav>
 
     <!-- ── Tab: Evidenca dela (original view) ────────────────── -->
@@ -209,6 +211,105 @@
       </section>
     </div>
 
+    <!-- ── Tab: Gnojilni načrt (admin-only) — fertilizer plans per field,
+         soil lab results (+ Excel import) and the calculation settings.
+         All behavior lives in fertilization.js; app.js's switchTab() only
+         shows/hides #panelGnojilni, same split as Planiranje/planning.js.
+         Data: fert_* and lab_* tables (supabase/schema/migration_fert_*.sql,
+         migration_lab_soil_results.sql). -->
+    <div id="panelGnojilni" class="tab-panel" hidden>
+      <section class="logs-section wo-section">
+        <div class="section-header fert-head">
+          <div class="fert-subnav" role="tablist" aria-label="Gnojilni načrt">
+            <button type="button" class="fert-subnav-btn fert-subnav-btn--active" role="tab" aria-selected="true" data-fert-view="plans">Načrti</button>
+            <button type="button" class="fert-subnav-btn" role="tab" aria-selected="false" data-fert-view="lab">Analize tal</button>
+            <button type="button" class="fert-subnav-btn" role="tab" aria-selected="false" data-fert-view="settings">Nastavitve</button>
+          </div>
+          <div class="fert-head-actions">
+            <button type="button" id="fertNewPlanBtn" class="btn btn-primary btn-sm">+ Nov načrt</button>
+            <button type="button" id="fertImportOpenBtn" class="btn btn-primary btn-sm" hidden>⬆ Uvoz Excel</button>
+          </div>
+        </div>
+
+        <!-- Načrti — one plan per field (GERK) and date (fert_plan*) -->
+        <div id="fertViewPlans" class="fert-view">
+          <div class="fert-toolbar">
+            <label class="fert-field">
+              <span class="field-label">Iskanje</span>
+              <input type="search" id="fertPlanSearch" class="field-input fert-input" placeholder="Stranka, GERK ali kultura">
+            </label>
+            <label class="fert-field fert-field--narrow">
+              <span class="field-label">Status</span>
+              <select id="fertPlanStatus" class="field-input fert-input">
+                <option value="">Vsi</option><option value="osnutek">Osnutek</option><option value="potrjeno">Potrjeno</option>
+              </select>
+            </label>
+          </div>
+          <div class="reports-table-wrap">
+            <table class="evidenca-table fert-table">
+              <thead><tr><th>Datum načrta</th><th>Stranka</th><th>GERK / polje</th><th>Kultura</th><th class="fert-num">ha</th><th class="fert-num">Segmenti</th><th>Status</th><th></th></tr></thead>
+              <tbody id="fertPlanRows"></tbody>
+            </table>
+          </div>
+          <p class="fert-hint">En načrt = eno polje (GERK) na določen datum. Vrednosti iz Nastavitev so privzete — v posameznem načrtu jih lahko spremeniš, shranijo se samo za ta načrt.</p>
+        </div>
+
+        <!-- Načrt — step-by-step wizard, rendered by fertilization.js -->
+        <div id="fertViewWizard" class="fert-view" hidden></div>
+
+        <!-- Analize tal — lab_soil_result list -->
+        <div id="fertViewLab" class="fert-view" hidden>
+          <div class="fert-toolbar">
+            <label class="fert-field">
+              <span class="field-label">Iskanje</span>
+              <input type="search" id="fertLabSearch" class="field-input fert-input" placeholder="Št. vzorca, stranka, GERK, nalog">
+            </label>
+            <label class="fert-field fert-field--narrow">
+              <span class="field-label">Prikaz</span>
+              <select id="fertLabMode" class="field-input fert-input">
+                <option value="linked">Povezani z nalogi</option>
+                <option value="unlinked">Nepovezani</option>
+              </select>
+            </label>
+          </div>
+          <div id="fertLabNotice"></div>
+          <div class="reports-table-wrap">
+            <table class="evidenca-table fert-table fert-lab-table">
+              <!-- sortable header, rendered by fertilization.js (LAB_LINKED_COLUMNS / LAB_UNLINKED_COLUMNS) -->
+              <thead><tr id="fertLabHead"></tr></thead>
+              <tbody id="fertLabRows"></tbody>
+            </table>
+          </div>
+          <p class="fert-hint">Vrednosti, kot je „&lt;25“, se v izračunu uporabijo kot 25 — originalno besedilo laboratorija ostane shranjeno.</p>
+        </div>
+
+        <!-- Uvoz — pick files/folder → preview → confirm -->
+        <div id="fertViewImport" class="fert-view" hidden>
+          <button type="button" id="fertImportBackBtn" class="btn btn-secondary btn-sm">← Analize tal</button>
+          <h2 class="section-title fert-title">Uvoz laboratorijskih rezultatov</h2>
+          <label class="fert-field">
+            <span class="field-label">Ime datoteke vsebuje</span>
+            <input type="text" id="fertImportNameFilter" class="field-input fert-input" placeholder="npr. proagrar 2026">
+          </label>
+          <div class="fert-dropzone" id="fertDropzone">
+            <span class="fert-dropzone-title">Povleci Excel datoteke sem</span>
+            <span class="fert-hint">.xlsx izvozi iz laboratorija · več datotek hkrati · že uvožene datoteke se preskočijo</span>
+            <div class="fert-dropzone-actions">
+              <label class="btn btn-secondary btn-sm">Izberi datoteke<input type="file" id="fertImportFiles" accept=".xlsx,.xls" multiple hidden></label>
+              <label class="btn btn-secondary btn-sm">Izberi mapo<input type="file" id="fertImportFolder" webkitdirectory multiple hidden></label>
+            </div>
+          </div>
+          <div id="fertImportPreview"></div>
+        </div>
+
+        <!-- Nastavitve — read-only for now (editing comes later) -->
+        <div id="fertViewSettings" class="fert-view" hidden>
+          <!-- view / edit / review-and-confirm, rendered by fertilization.js (renderSettings) -->
+          <div id="fertSettingsBody"></div>
+        </div>
+      </section>
+    </div>
+
     <!-- ── Poročila (admin only) — full-screen view, not a tab-bar
          entry (opened from the + menu, no persistent button). The tab
          bar itself hides while this is shown; ← Nazaj returns to
@@ -284,6 +385,12 @@
               <div class="wo-gerk-checklist" id="reportsCustomerFilterList"></div>
             </div>
           </div>
+          <!-- Which ha the rates (Točk/ha, Čas/ha, Ha/h …) divide by: Izvedeni ha
+               (whole completed GERKs) or Vzorčeni ha (minus segments marked
+               "ne pobereš") — see reportsHaBase() in app.js. -->
+          <label class="reports-check" title="Razmerja (Točk/ha, Ha/točko, Čas/ha, Ha/h) računaj z vzorčenimi ha — brez segmentov, označenih »ne pobereš«">
+            <input type="checkbox" id="reportsSampledHaCb"> Brez »ne pobereš«
+          </label>
         </div>
 
         <!-- Bar chart: per day/week/month (toggle, default weekly), measure
@@ -402,12 +509,18 @@
       <div class="wo-detail-layout">
         <div class="wo-detail-map-wrap">
           <div id="woDetailMap" class="wo-detail-map"></div>
-          <!-- Shrinks the GERK list to a compact code+segment reference
-               (see renderCompactGerkList()) and grows the map — for
-               desktop side-by-side viewing where the full form isn't
-               needed, just orientation on the map. -->
-          <button type="button" id="woMapExpandBtn" class="wo-map-expand-btn">⛶ Razširi zemljevid</button>
-          <button type="button" id="woMapLayersBtn" class="wo-map-layers-btn wo-map-layers-btn--detail" aria-pressed="false" title="Prikaži/skrij ceste in imena krajev">🛣 Ceste/imena</button>
+          <!-- Stacked in a flex column instead of each on its own magic-
+               number top offset — the two previously drifted into
+               overlapping/touching each other whenever either button's
+               rendered height changed slightly. -->
+          <div class="wo-map-top-left-controls">
+            <!-- Shrinks the GERK list to a compact code+segment reference
+                 (see renderCompactGerkList()) and grows the map — for
+                 desktop side-by-side viewing where the full form isn't
+                 needed, just orientation on the map. -->
+            <button type="button" id="woMapExpandBtn" class="wo-map-expand-btn">⛶ Razširi zemljevid</button>
+            <button type="button" id="woMapLayersBtn" class="wo-map-layers-btn wo-map-layers-btn--detail" aria-pressed="false" title="Prikaži/skrij ceste in imena krajev">🛣 Ceste/imena</button>
+          </div>
           <!-- Set by highlightGerkOnWoMap() when a GERK row is clicked —
                just a name label, so it's clear which GERK is highlighted
                while panning/zooming, not an interactive control. -->
@@ -450,37 +563,14 @@
 
         <!-- GERKs: one row per planned field, Start/Stop logs start/end time -->
         <div class="field wo-gerk-field">
-          <label class="field-label">GERKI</label>
-          <!-- Admin only: import a KML file — enriches the matching GERK's
-               row if it's already on this order, adds it first if not. -->
-          <div class="wlg-import-zones" id="woImportZonesWrap" hidden>
-            <input type="file" accept=".kml" multiple class="wlg-kml-input" id="woKmlInput" hidden>
-            <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesPickBtn">Uvozi cone (KML)</button>
-            <div class="wlg-import-zones-form" id="woImportZonesForm" hidden>
-              <div class="wlg-import-zones-files" id="woImportZonesFiles"></div>
-              <datalist id="woImportZonesGerkList"></datalist>
-              <select class="sample-field-input" id="woImportZonesType">
-                <option value="vzorčenje">Vzorčenje</option>
-                <option value="gnojenje">Gnojenje</option>
-                <option value="setev">Setev</option>
-              </select>
-              <!-- Globina only makes sense for Vzorčenje — shown/hidden to
-                   match the Tip segmentacije selection above. One value
-                   here applies to every segment this import creates. -->
-              <select class="sample-field-input" id="woImportZonesGlobina">
-                <option value="">Globina…</option>
-                <option value="12">12 cm</option>
-                <option value="20">20 cm</option>
-                <option value="25">25 cm</option>
-                <option value="30">30 cm</option>
-                <option value="60">60 cm</option>
-                <option value="90">90 cm</option>
-              </select>
-              <input type="date" class="sample-field-input" id="woImportZonesDate">
-              <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesConfirmBtn">Uvozi</button>
-              <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesCancelBtn">Prekliči</button>
-            </div>
-            <div class="alert alert-error" id="woImportZonesError" hidden role="alert"></div>
+          <div class="wlg-gerk-label-row">
+            <!-- Admin only: toggles every GERK's own selection checkbox at
+                 once — rebuilt per render in renderWorkLogGerkRows(), same
+                 reasoning as the main list's woSelectAllCheckbox. -->
+            <label class="wlg-select-all-label" id="wlgSelectAllWrap" hidden>
+              <input type="checkbox" id="wlgSelectAllCheckbox" aria-label="Izberi vse GERKE">
+            </label>
+            <label class="field-label">GERKI</label>
           </div>
           <div id="workLogGerkRows" class="wlg-table"></div>
           <!-- Phone only (CSS): pages through .wlg-row elements one at a
@@ -496,19 +586,47 @@
                woMapExpandBtn) — code + segment numbers only, click to
                highlight on the map, no edit controls. -->
           <div id="wlgCompactList" class="wlg-compact-list" hidden></div>
-          <!-- Admin only: add a GERK to an already-created order — the create
-               form's own +/− only works before the first save. -->
+          <!-- Admin only: both ways to add more GERKs to this order sit
+               together at the end of the list — the paste textarea on
+               top, its own "+ Dodaj GERK-e" button and the KML import
+               trigger side by side in a row below it. -->
           <div class="field" id="woAddExistingGerkWrap" hidden>
             <label class="field-label" for="woAddExistingGerkPaste">Ali prilepite GERK šifre (vejica, ali direktno iz Excela — vrstica/stolpec, ali lab. listo GERK/Ha/FMS/Št. segmenta)</label>
             <textarea class="field-input field-textarea" id="woAddExistingGerkPaste" rows="3" placeholder="npr. 830635, 1367184, 1319486&#10;ali prilepite stolpec/vrstice iz Excela"></textarea>
-            <button type="button" class="btn btn-secondary btn-sm" id="woAddExistingGerkBtn">+ Dodaj GERK-e</button>
-          </div>
-          <!-- Admin only: export selected GERKs' sampling zones to a
-               NextFarm-compatible shapefile (zone geometry + sample
-               numbers; lab-analysis columns ship blank, filled in later
-               by NextFarm/the lab once results come back). -->
-          <div class="gerk-wrap" id="woExportSamplingWrap" hidden>
-            <button type="button" class="btn btn-secondary btn-sm" id="woExportSamplingBtn">📦 Izvoz vzorčenja</button>
+            <div class="wlg-gerk-add-buttons-row">
+              <button type="button" class="btn btn-secondary btn-sm" id="woAddExistingGerkBtn">+ Dodaj GERK-e</button>
+              <!-- Import a KML file — enriches the matching GERK's row if
+                   it's already on this order, adds it first if not. -->
+              <div class="wlg-import-zones" id="woImportZonesWrap">
+                <input type="file" accept=".kml" multiple class="wlg-kml-input" id="woKmlInput" hidden>
+                <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesPickBtn">Uvozi cone (KML)</button>
+                <div class="wlg-import-zones-form" id="woImportZonesForm" hidden>
+                  <div class="wlg-import-zones-files" id="woImportZonesFiles"></div>
+                  <datalist id="woImportZonesGerkList"></datalist>
+                  <select class="sample-field-input" id="woImportZonesType">
+                    <option value="vzorčenje">Vzorčenje</option>
+                    <option value="gnojenje">Gnojenje</option>
+                    <option value="setev">Setev</option>
+                  </select>
+                  <!-- Globina only makes sense for Vzorčenje — shown/hidden to
+                       match the Tip segmentacije selection above. One value
+                       here applies to every segment this import creates. -->
+                  <select class="sample-field-input" id="woImportZonesGlobina">
+                    <option value="">Globina…</option>
+                    <option value="12">12 cm</option>
+                    <option value="20">20 cm</option>
+                    <option value="25">25 cm</option>
+                    <option value="30">30 cm</option>
+                    <option value="60">60 cm</option>
+                    <option value="90">90 cm</option>
+                  </select>
+                  <input type="date" class="sample-field-input" id="woImportZonesDate">
+                  <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesConfirmBtn">Uvozi</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="woImportZonesCancelBtn">Prekliči</button>
+                </div>
+                <div class="alert alert-error" id="woImportZonesError" hidden role="alert"></div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -847,39 +965,6 @@
     </div>
   </div>
 
-  <!-- ── Export sampling zones (NextFarm shapefile) — admin only ───── -->
-  <div id="exportSamplingModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="exportSamplingModalTitle">
-    <div class="modal-sheet modal-sheet-compact">
-      <div class="modal-handle" aria-hidden="true"></div>
-      <div class="modal-head">
-        <h3 id="exportSamplingModalTitle" class="modal-title">Izvoz vzorčenja</h3>
-        <button id="exportSamplingModalClose" class="btn btn-icon" aria-label="Zapri">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <line x1="17" y1="3" x2="3" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <div class="work-form">
-        <p class="field-hint">Izberite GERK-e, katerih cone vzorčenja želite izvoziti v shapefile za NextFarm. Prikazani so samo GERK-i z uvoženimi conami.</p>
-        <label class="wo-gerk-check-item">
-          <input type="checkbox" id="exportSamplingSelectAllCb">
-          <span class="wo-gerk-check-code">Izberi vse</span>
-        </label>
-        <div id="exportSamplingList" class="wo-gerk-checklist"></div>
-        <p class="field-hint" id="exportSamplingNote" hidden></p>
-        <div id="exportSamplingError" class="alert alert-error" hidden role="alert"></div>
-        <div class="form-actions">
-          <button type="button" id="exportSamplingCancelBtn" class="btn btn-secondary btn-flex">Prekliči</button>
-          <button type="button" id="exportSamplingConfirmBtn" class="btn btn-primary btn-flex">
-            <span class="btn-label">Izvozi</span>
-            <span class="btn-spinner" hidden aria-hidden="true"></span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- ── Map (Leaflet — embedded preview, "Odpri v Google Maps" still
        there for actual turn-by-turn navigation) ─────────────────── -->
   <div id="mapModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="mapModalTitle">
@@ -905,6 +990,7 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script type="module" src="app.js"></script>
   <script type="module" src="planning.js"></script>
+  <script type="module" src="fertilization.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').then(reg => reg.update());

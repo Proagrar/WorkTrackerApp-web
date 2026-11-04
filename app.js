@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v3.120';
+const APP_VERSION = 'v4.32';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -24,7 +24,7 @@ let logs         = [];
 let fields       = [];
 let currentMonth = new Date().toISOString().slice(0, 7);
 
-let currentTab       = 'nalogi'; // 'evidenca' | 'nalogi' | 'planiranje' | 'reports'
+let currentTab       = 'nalogi'; // 'evidenca' | 'nalogi' | 'planiranje' | 'gnojilni' | 'reports'
 let preReportsTab    = 'nalogi'; // which real tab to return to from Poročila — see openReportsView()
 let reportsData         = []; // raw rows from get_work_orders_report(), refetched every time the view opens
 let reportsStatusValues = new Set();
@@ -32,6 +32,9 @@ let reportsCustomerValues = new Set();
 let selectedReportIds   = new Set();
 let reportsChartGrouping = 'week'; // 'day' | 'week' — toggle above the chart, see renderReportsChart()
 let reportsChartMetric   = 'time'; // 'time' | 'ha' — second toggle above the chart
+// Rates divide by Vzorčeni ha (no "ne pobereš" segments) instead of Izvedeni ha
+// — checkbox in the filter row, remembered per browser (Matej, 2026-10-30).
+let reportsUseSampledHa  = (() => { try { return localStorage.getItem('reportsUseSampledHa') === '1'; } catch { return false; } })();
 let workOrders       = [];
 let workOrdersLoaded = false;
 let workOrderCenterPoints = {}; // work_order_id -> {lat, lng}, from get_work_orders_center_points
@@ -88,16 +91,6 @@ const woRestoreBtn = document.getElementById('woRestoreBtn');
 const woAddExistingGerkWrap = document.getElementById('woAddExistingGerkWrap');
 const woAddExistingGerkPaste = document.getElementById('woAddExistingGerkPaste');
 const woAddExistingGerkBtn = document.getElementById('woAddExistingGerkBtn');
-const woExportSamplingWrap      = document.getElementById('woExportSamplingWrap');
-const woExportSamplingBtn       = document.getElementById('woExportSamplingBtn');
-const exportSamplingModal       = document.getElementById('exportSamplingModal');
-const exportSamplingModalClose  = document.getElementById('exportSamplingModalClose');
-const exportSamplingList        = document.getElementById('exportSamplingList');
-const exportSamplingSelectAllCb = document.getElementById('exportSamplingSelectAllCb');
-const exportSamplingNote        = document.getElementById('exportSamplingNote');
-const exportSamplingErrorEl     = document.getElementById('exportSamplingError');
-const exportSamplingCancelBtn   = document.getElementById('exportSamplingCancelBtn');
-const exportSamplingConfirmBtn  = document.getElementById('exportSamplingConfirmBtn');
 const woImportZonesWrap = document.getElementById('woImportZonesWrap');
 const woKmlInput = document.getElementById('woKmlInput');
 const woImportZonesPickBtn = document.getElementById('woImportZonesPickBtn');
@@ -132,6 +125,8 @@ const roadAddBtn  = document.getElementById('roadAddBtn');
 const roadCommentInput = document.getElementById('roadComment');
 const roadTimeListEl = document.getElementById('roadTimeList');
 const workLogGerkRowsEl = document.getElementById('workLogGerkRows');
+const wlgSelectAllWrap = document.getElementById('wlgSelectAllWrap');
+const wlgSelectAllCheckbox = document.getElementById('wlgSelectAllCheckbox');
 const woGerkPagerEl       = document.getElementById('woGerkPager'); // phone-only — see updateGerkPaging()
 const woGerkPagerLabelEl  = document.getElementById('woGerkPagerLabel');
 const woGerkPagerPrevBtn  = document.getElementById('woGerkPagerPrev');
@@ -148,9 +143,11 @@ const tabBarEl        = document.querySelector('.tab-bar');
 const tabEvidenca     = document.getElementById('tabEvidenca');
 const tabNalogi       = document.getElementById('tabNalogi');
 const tabPlaniranje   = document.getElementById('tabPlaniranje');
+const tabGnojilni     = document.getElementById('tabGnojilni');
 const panelEvidenca   = document.getElementById('panelEvidenca');
 const panelNalogi     = document.getElementById('panelNalogi');
 const panelPlaniranje = document.getElementById('panelPlaniranje');
+const panelGnojilni   = document.getElementById('panelGnojilni');
 const workOrdersList = document.getElementById('workOrdersList');
 const woHaChipTotal = document.getElementById('woHaChipTotal');
 const woHaChipIzvedeno = document.getElementById('woHaChipIzvedeno');
@@ -232,6 +229,7 @@ const reportsStatusFilterMenu = document.getElementById('reportsStatusFilterMenu
 const reportsOperatorFilter   = document.getElementById('reportsOperatorFilter');
 const reportsDateFrom         = document.getElementById('reportsDateFrom');
 const reportsDateTo           = document.getElementById('reportsDateTo');
+const reportsSampledHaCb      = document.getElementById('reportsSampledHaCb');
 const reportsCustomerFilterBtn   = document.getElementById('reportsCustomerFilterBtn');
 const reportsCustomerFilterMenu  = document.getElementById('reportsCustomerFilterMenu');
 const reportsCustomerFilterList  = document.getElementById('reportsCustomerFilterList');
@@ -722,10 +720,15 @@ function addGerkRow(container = woGerksListEl, code = '', hectares = '', lokacij
 // edited by hand. Vzorčenje is per-segment (unlike Globina, which is
 // bulk-applied to the whole order at save time) since a paste can
 // genuinely mix "ne pobereš"/"združi_1"/etc. across different segments.
-function addGerkSegmentRow(row, fms = '', sampleNo = '', vzorcenje = '') {
+function addGerkSegmentRow(row, fms = '', sampleNo = '', vzorcenje = '', areaHa = null) {
   const list = row.querySelector('.gerk-segments-list');
   const segRow = document.createElement('div');
   segRow.className = 'gerk-segment-row';
+  // areaHa (a KML-imported zone's own polygon area) has no visible input —
+  // the form only shows FMS/Sample no/Vzorčenje — but needs to survive
+  // through to the final insert so export can report it per segment, so
+  // it's carried as a dataset value instead.
+  segRow.dataset.areaHa = areaHa != null ? areaHa : '';
   const vzorcenjeOpts = ['<option value="">Vzorčenje…</option>']
     .concat(SAMPLE_ACTIONS.map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`))
     .join('');
@@ -759,9 +762,9 @@ function addGerkSegments(row, segments) {
   const existing = new Set(
     Array.from(row.querySelectorAll('.gerk-segment-sample')).map(el => el.value.trim())
   );
-  for (const { fms, sampleNo, vzorcenje } of segments) {
+  for (const { fms, sampleNo, vzorcenje, areaHa } of segments) {
     if (!sampleNo || existing.has(sampleNo)) continue;
-    addGerkSegmentRow(row, fms, sampleNo, vzorcenje);
+    addGerkSegmentRow(row, fms, sampleNo, vzorcenje, areaHa ?? null);
     existing.add(sampleNo);
   }
   updateGerkSegmentsCount(row);
@@ -857,6 +860,7 @@ function getFormGerks(container = woGerksListEl) {
       fms:       sr.querySelector('.gerk-segment-fms').value.trim() || null,
       sampleNo:  sr.querySelector('.gerk-segment-sample').value.trim(),
       vzorcenje: sr.querySelector('.gerk-segment-vzorcenje').value || null,
+      areaHa:    sr.dataset.areaHa ? parseFloat(sr.dataset.areaHa) : null,
     })).filter(s => s.sampleNo),
   })).filter(g => g.code);
 }
@@ -1052,7 +1056,7 @@ function toTimeInputValue(iso) {
 // cell color to show which segments group together, and only the
 // word itself survived the import, not which group — so these rows
 // genuinely don't have a group number to default to.
-const SAMPLE_ACTIONS = ['ne pobereš', 'združi', 'združi_1', 'združi_2', 'združi_3', 'združi_4', 'združi_5'];
+const SAMPLE_ACTIONS = ['ne pobereš', 'združi', 'združi_1', 'združi_2', 'združi_3', 'združi_4', 'združi_5', 'združi_6', 'združi_7', 'združi_8', 'združi_9', 'združi_10'];
 const SAMPLE_DEPTHS  = [12, 20, 25, 30, 60, 90];
 
 // Lab sheets paste "združi 1" (space) — SAMPLE_ACTIONS uses "združi_1"
@@ -1293,9 +1297,21 @@ function renderWorkLogGerkRows(rows) {
 
   wireGerkRowButtons();
   updateGerkSelectionBar();
+  wlgSelectAllWrap.hidden = !isAdminView();
+  updateWlgSelectAllCheckbox();
   if (woMapExpanded) renderCompactGerkList();
   woGerkPageIndex = 0;
   updateGerkPaging();
+}
+
+// Keeps the "Izberi vse" checkbox's checked/indeterminate state matching
+// selectedGerkCodes vs. every GERK currently in the list — same reasoning
+// as the main list's updateSelectAllCheckboxState().
+function updateWlgSelectAllCheckbox() {
+  const codes = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row')).map(r => r.dataset.code);
+  const selectedCount = codes.filter(c => selectedGerkCodes.has(c)).length;
+  wlgSelectAllCheckbox.checked = codes.length > 0 && selectedCount === codes.length;
+  wlgSelectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < codes.length;
 }
 
 // Compact code + segment-numbers + Start/Konec view, shown in place of
@@ -1508,7 +1524,6 @@ function updateOrderHeader() {
   // adding a GERK to an "Izvedeno" order now correctly drops it back to
   // "V delu".
   woAddExistingGerkWrap.hidden = !isAdmin;
-  woExportSamplingWrap.hidden  = !isAdmin;
 
   // Delete (archive) / restore — mutually exclusive on deleted_at, admin-only.
   const isDeleted = !!wo.deleted_at;
@@ -1539,6 +1554,8 @@ let currentRoadTimeEntries = [];
 let currentAllGerkEntries  = []; // every operator's work_log_gerks for this work order — powers the "who else worked on this" view
 let currentCapturedPoints  = []; // gerk_captured_point rows for this work order — the right-side map capture panel
 let currentGerkSegments    = []; // get_work_order_gerk_segments rows — one per imported zone, powers the per-GERK badge + map layer
+let woMapSegmentLabelLayers = new Map(); // segment_id -> its permanent map label tooltip layer, so renaming a segment (updateSampleNo) can patch it live
+let woMapSegmentPointLayers = new Map(); // segment_id -> [{ layer, pointNo }] captured-point markers, same reason
 let selectedGerkCodes      = new Set(); // admin-only multi-select on the GERK list, powers the contextual selection bar
 let currentDetailPlanId    = null; // delovni_nalogi_planiranje.id backing the "Planirano" field, if any — see loadPlanDateForDetail()
 let currentDetailPlanDate  = null;
@@ -1753,6 +1770,8 @@ async function showWoDetailMap(workOrder) {
   woMapCapturedLayer.clearLayers();
   currentCapturedPoints = [];
   currentGerkSegments = [];
+  woMapSegmentLabelLayers = new Map();
+  woMapSegmentPointLayers = new Map();
   woCaptureList.innerHTML = '';
   woCaptureError.hidden = true;
   woCaptureShowPoints.checked = true;
@@ -1877,10 +1896,11 @@ async function showWoDetailMap(workOrder) {
     // polygon, or inside a tightly-packed neighboring one.
     if (row.label_point) {
       const [lpLng, lpLat] = row.label_point.coordinates;
-      L.tooltip({ permanent: true, direction: 'center', className: 'wo-map-segment-label' })
+      const labelLayer = L.tooltip({ permanent: true, direction: 'center', className: 'wo-map-segment-label' })
         .setLatLng([lpLat, lpLng])
         .setContent(row.segment_label || '')
         .addTo(woMapSegmentLayer);
+      if (row.segment_id) woMapSegmentLabelLayers.set(row.segment_id, labelLayer);
     }
     layer.on('mouseover', () => highlightGerkRow(row.gerk_code, true));
     layer.on('mouseout',  () => highlightGerkRow(row.gerk_code, false));
@@ -1895,9 +1915,13 @@ async function showWoDetailMap(workOrder) {
     woMapLayersByCode.set(row.gerk_code, entry);
     for (const p of (row.points || [])) {
       const [lng, lat] = p.geojson.coordinates;
-      L.circleMarker([lat, lng], { radius: 5, color: '#D97706', weight: 2, fillColor: '#fff', fillOpacity: 1 })
+      const ptLayer = L.circleMarker([lat, lng], { radius: 5, color: '#D97706', weight: 2, fillColor: '#fff', fillOpacity: 1 })
         .bindTooltip(`${row.segment_label || ''} · ${p.point_no ?? ''}`.trim())
         .addTo(woMapSegmentLayer);
+      if (row.segment_id) {
+        if (!woMapSegmentPointLayers.has(row.segment_id)) woMapSegmentPointLayers.set(row.segment_id, []);
+        woMapSegmentPointLayers.get(row.segment_id).push({ layer: ptLayer, pointNo: p.point_no });
+      }
     }
   }
 
@@ -2037,7 +2061,7 @@ async function removeGerkSegmentation(btn) {
 function renderCapturedPointsList() {
   woCaptureList.innerHTML = currentCapturedPoints.map(p => `
     <div class="wo-capture-item" data-id="${escHtml(p.id)}" data-lat="${p.lat}" data-lng="${p.lng}">
-      <span>Točka ${p.point_no}${p.segment_label ? ` · ${escHtml(p.segment_label)}` : ''}</span>
+      <span>Točka ${p.point_no}</span>
       <button type="button" class="wo-capture-item-remove" data-action="wo-capture-remove" aria-label="Izbriši točko">✕</button>
     </div>`).join('');
 }
@@ -2320,6 +2344,10 @@ function closeModal() {
   hideModalAnimated(formModal);
   document.body.style.overflow = '';
   stopWatchingMyLocationOnWoMap();
+  // Without this, a GERK selection left checked when the order was closed
+  // kept wlgSelectionBar floating over the main list afterward — stacked
+  // on top of woSelectionBar if a row was also selected there.
+  clearGerkSelection();
   // Time logged via the live Start/Stop timers writes straight to Supabase
   // without updating the in-memory `logs` array — refresh it so Evidenca
   // dela reflects what was just logged.
@@ -2576,6 +2604,7 @@ function wireGerkRowButtons() {
       if (cb.checked) selectedGerkCodes.add(cb.dataset.code);
       else selectedGerkCodes.delete(cb.dataset.code);
       updateGerkSelectionBar();
+      updateWlgSelectAllCheckbox();
     });
   });
   workLogGerkRowsEl.querySelectorAll('[data-action="wlg-start"]').forEach(btn => {
@@ -2743,10 +2772,15 @@ async function removeGerkFromOrder(btn) {
 const WLG_SEL_ICON_CLOSE = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="4" y1="4" x2="16" y2="16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="16" y1="4" x2="4" y2="16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`;
 const WLG_SEL_ICON_TRASH = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6m-6 0v9a1.5 1.5 0 0 0 1.5 1.5h5A1.5 1.5 0 0 0 14 15V6M7.5 9v4M12.5 9v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const WLG_SEL_ICON_DOWNLOAD = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v9m0 0-3.5-3.5M10 12l3.5-3.5M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const WLG_SEL_ICON_ZIP = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 4v2m0 2v2m0 2v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;
 
+// KML export (exportSelectedGerksToKml) intentionally not wired into this
+// bar for now — not needed currently, kept in code (not deleted) in case
+// it's wanted back.
 const GERK_SELECTION_ACTIONS = [
-  { id: 'export', label: 'Izvozi',  tooltip: 'Izvozi izbrane GERKE v KML',       icon: WLG_SEL_ICON_DOWNLOAD, variant: 'default', onClick: exportSelectedGerksToKml },
-  { id: 'delete', label: 'Briši',   tooltip: 'Izbriši izbrane GERKE iz naloga',  icon: WLG_SEL_ICON_TRASH,    variant: 'danger',  onClick: bulkDeleteSelectedGerks },
+  { id: 'export',     label: 'Izvozi',      tooltip: 'Izvozi izbrane GERKE v Excel',                 icon: WLG_SEL_ICON_DOWNLOAD, variant: 'default', onClick: exportSelectedGerksToExcel },
+  { id: 'export-shp', label: 'ZIP',          tooltip: 'Izvozi cone vzorčenja izbranih GERKOV (shapefile/NextFarm)', icon: WLG_SEL_ICON_ZIP, variant: 'default', onClick: exportSelectedGerksToShapefile },
+  { id: 'delete',     label: 'Briši',       tooltip: 'Izbriši izbrane GERKE iz naloga',              icon: WLG_SEL_ICON_TRASH,    variant: 'danger',  onClick: bulkDeleteSelectedGerks },
 ];
 
 function buildSelectionBar() {
@@ -2789,7 +2823,20 @@ function clearGerkSelection() {
   selectedGerkCodes = new Set();
   workLogGerkRowsEl.querySelectorAll('[data-action="wlg-select"]').forEach(cb => { cb.checked = false; });
   updateGerkSelectionBar();
+  updateWlgSelectAllCheckbox();
 }
+
+wlgSelectAllCheckbox.addEventListener('click', () => {
+  const codes = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row')).map(r => r.dataset.code);
+  const anySelected = codes.some(c => selectedGerkCodes.has(c));
+  if (anySelected) codes.forEach(c => selectedGerkCodes.delete(c));
+  else codes.forEach(c => selectedGerkCodes.add(c));
+  workLogGerkRowsEl.querySelectorAll('[data-action="wlg-select"]').forEach(cb => {
+    cb.checked = selectedGerkCodes.has(cb.dataset.code);
+  });
+  updateGerkSelectionBar();
+  updateWlgSelectAllCheckbox();
+});
 
 // Same reasoning as the single-row remove: segments/samples cascade-
 // delete automatically via the DB's own FK, no guard needed. Logged
@@ -2936,6 +2983,34 @@ function exportSelectedGerksToKml(btn) {
   const filename = `${(currentDetailWorkOrder?.stevilka || 'gerki').replace(/[^\w.-]+/g, '_')}_export.kml`;
   downloadTextFile(filename, kml, 'application/vnd.google-earth.kml+xml');
   showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'oblika' : 'oblik'} v KML.` + (skipped.length ? ` Brez geometrije: ${skipped.join(', ')}.` : ''));
+}
+
+// Same CSV shape as the work-orders list's export (one row per segment,
+// Ha = the segment's own area_ha, comma-decimal for Excel) — just scoped
+// to the selected GERKs of this one order instead of a set of orders.
+function exportSelectedGerksToExcel(btn) {
+  const codes = [...selectedGerkCodes];
+  if (!codes.length) return;
+
+  const wo = currentDetailWorkOrder;
+  const gerks = (wo?.delovni_nalogi_gerki || []).filter(g => codes.includes(g.gerk_code));
+  if (!gerks.length) return;
+
+  const header = ['Št. naloga', 'GERK', 'Segment', 'Ha'];
+  const lines = [header.map(csvField).join(';')];
+  for (const g of gerks) {
+    const segments = g.delovni_nalogi_vzorci || [];
+    if (!segments.length) {
+      lines.push([wo.stevilka || '', g.gerk_code || '', '', csvHa(g.kolicina_ha)].map(csvField).join(';'));
+    } else {
+      for (const s of segments) {
+        lines.push([wo.stevilka || '', g.gerk_code || '', s.sample_no || '', csvHa(s.area_ha)].map(csvField).join(';'));
+      }
+    }
+  }
+
+  const csv = '﻿' + lines.join('\r\n');
+  downloadTextFile(`${(wo?.stevilka || 'gerki').replace(/[^\w.-]+/g, '_')}_export.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 // ── Export sampling zones to a NextFarm-compatible shapefile ─────
@@ -3212,75 +3287,14 @@ function zoneAreaHa(seg, projectedRings) {
   return nfPolygonAreaHa(rings);
 }
 
-function openExportSamplingModal() {
+// Same shapefile build as before, now driven directly by the GERK
+// selection bar's selectedGerkCodes instead of its own picker modal —
+// GERKs with no imported sampling zone geometry are silently skipped
+// (reported in the result message) rather than never shown at all.
+function exportSelectedGerksToShapefile(btn) {
   if (!currentDetailWorkOrder) return;
-  exportSamplingErrorEl.hidden = true;
-  exportSamplingNote.hidden = true;
-
-  const byCode = new Map();
-  for (const seg of currentGerkSegments) {
-    if (!seg.segment_geojson) continue;
-    if (!byCode.has(seg.gerk_code)) byCode.set(seg.gerk_code, []);
-    byCode.get(seg.gerk_code).push(seg);
-  }
-
-  const gerkLines = currentDetailWorkOrder.delovni_nalogi_gerki || [];
-  // get_work_order_gerk_segments tags every zone with the order LINE's own
-  // gerk_code (sg.full_code in that RPC — even for a compound "A+B+C" line,
-  // it doesn't expose which real sub-GERK a zone belongs to), so this
-  // already matches delovni_nalogi_gerki.gerk_code / work_log_gerks.gerk_code
-  // directly — no split/rejoin needed, unlike the per-real-sub-GERK
-  // treatment used for ARKOD shapes and the KML export elsewhere.
-  const rows = [...byCode.entries()].map(([code, zones]) => {
-    const completed = currentAllGerkEntries.some(e => e.gerk_code === code && e.completed);
-    const ha = zones.reduce((s, z) => s + zoneAreaHa(z), 0);
-    return { code, zones, completed, ha };
-  }).sort((a, b) => a.code.localeCompare(b.code, 'sl'));
-
-  const skippedCodes = gerkLines.map(g => g.gerk_code).filter(code => !byCode.has(code));
-
-  exportSamplingList.innerHTML = rows.map(r => `
-    <label class="wo-gerk-check-item">
-      <input type="checkbox" class="export-sampling-cb" value="${escHtml(r.code)}">
-      <span class="wo-gerk-check-code">${escHtml(r.code)}</span>
-      <span class="wo-gerk-check-name">${r.zones.length} ${r.zones.length === 1 ? 'cona' : 'con'} · ${r.ha.toFixed(2)} ha</span>
-      <span class="wo-status-badge ${r.completed ? 'wo-status--izvedeno' : 'wo-status--plan'}">${r.completed ? 'Izvedeno' : 'Ni izvedeno'}</span>
-    </label>`).join('');
-
-  exportSamplingList.querySelectorAll('.export-sampling-cb').forEach(cb => cb.addEventListener('change', syncExportSamplingSelectAllCb));
-  syncExportSamplingSelectAllCb();
-
-  if (!rows.length) {
-    exportSamplingNote.textContent = 'Noben GERK na tem nalogu nima uvoženih con vzorčenja.';
-    exportSamplingNote.hidden = false;
-  } else if (skippedCodes.length) {
-    exportSamplingNote.textContent = `Brez con (ni v seznamu): ${skippedCodes.join(', ')}.`;
-    exportSamplingNote.hidden = false;
-  }
-
-  showModalAnimated(exportSamplingModal);
-}
-
-function closeExportSamplingModal() {
-  hideModalAnimated(exportSamplingModal);
-}
-
-function syncExportSamplingSelectAllCb() {
-  const cbs = [...exportSamplingList.querySelectorAll('.export-sampling-cb')];
-  const checked = cbs.filter(cb => cb.checked).length;
-  exportSamplingSelectAllCb.checked = cbs.length > 0 && checked === cbs.length;
-  exportSamplingSelectAllCb.indeterminate = checked > 0 && checked < cbs.length;
-}
-
-function showExportSamplingError(msg) {
-  exportSamplingErrorEl.textContent = msg;
-  exportSamplingErrorEl.hidden = false;
-}
-
-function confirmExportSampling() {
-  const codes = [...exportSamplingList.querySelectorAll('.export-sampling-cb:checked')].map(cb => cb.value);
-  if (!codes.length) { showExportSamplingError('Izberite vsaj en GERK.'); return; }
-  exportSamplingErrorEl.hidden = true;
+  const codes = [...selectedGerkCodes];
+  if (!codes.length) return;
 
   const customerName = (currentDetailWorkOrder.customers?.naziv || currentDetailWorkOrder.customers?.company_name || '').trim();
   const zones = currentGerkSegments
@@ -3305,7 +3319,7 @@ function confirmExportSampling() {
     });
   }
 
-  if (!features.length) { showExportSamplingError('Izbrani GERK-i nimajo geometrije za izvoz.'); return; }
+  if (!features.length) { showFormError('Noben izbran GERK nima uvožene cone vzorčenja za izvoz.'); return; }
 
   const { shp, shx } = nfBuildShpShx(features);
   const dbf = nfBuildDbf(NF_DBF_FIELDS, rows);
@@ -3319,19 +3333,10 @@ function confirmExportSampling() {
   ]);
 
   downloadTextFile(`${baseName}.zip`, zip, 'application/zip');
-  closeExportSamplingModal();
-  showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'cona' : 'con'} vzorčenja.`);
+  const exportedCodes = new Set(zones.map(z => z.gerk_code));
+  const skipped = codes.filter(c => !exportedCodes.has(c));
+  showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'cona' : 'con'} vzorčenja.` + (skipped.length ? ` Brez con: ${skipped.join(', ')}.` : ''));
 }
-
-woExportSamplingBtn.addEventListener('click', openExportSamplingModal);
-exportSamplingModalClose.addEventListener('click', closeExportSamplingModal);
-exportSamplingCancelBtn.addEventListener('click', closeExportSamplingModal);
-exportSamplingModal.addEventListener('click', e => { if (e.target === exportSamplingModal) closeExportSamplingModal(); });
-exportSamplingSelectAllCb.addEventListener('change', () => {
-  exportSamplingList.querySelectorAll('.export-sampling-cb').forEach(cb => { cb.checked = exportSamplingSelectAllCb.checked; });
-  exportSamplingSelectAllCb.indeterminate = false;
-});
-exportSamplingConfirmBtn.addEventListener('click', confirmExportSampling);
 
 async function updateSampleNo(inputEl) {
   const sampleId = inputEl.dataset.sampleId;
@@ -3341,12 +3346,33 @@ async function updateSampleNo(inputEl) {
     .find(g => (g.delovni_nalogi_vzorci || []).some(s => s.id === sampleId));
   const sample = gerk?.delovni_nalogi_vzorci.find(s => s.id === sampleId);
   if (sample && sample.sample_no === value) return;
+  const oldValue = sample?.sample_no;
 
   inputEl.disabled = true;
   try {
     const { error } = await supabase.from('delovni_nalogi_vzorci').update({ sample_no: value }).eq('id', sampleId);
     if (error) throw error;
     if (sample) sample.sample_no = value;
+
+    // The map's segment label comes from a separate table (gerk_segment.label,
+    // set once at KML import time, matched here only by string equality — no
+    // FK between the two) — without this it would silently drift from the
+    // renamed sample_no and keep showing the old number.
+    const seg = gerk && currentGerkSegments.find(s => s.gerk_code === gerk.gerk_code && s.segment_label === oldValue);
+    if (seg) {
+      // gerk_segment has no client-writable RLS policy — goes through a
+      // SECURITY DEFINER RPC, same as the other writes to this table.
+      const { error: segError } = await supabase.rpc('rename_gerk_segment', { p_segment_id: seg.segment_id, p_label: value });
+      if (!segError) {
+        seg.segment_label = value;
+        woMapSegmentLabelLayers.get(seg.segment_id)?.setContent(value);
+        (woMapSegmentPointLayers.get(seg.segment_id) || []).forEach(({ layer, pointNo }) => {
+          layer.setTooltipContent(`${value} · ${pointNo ?? ''}`.trim());
+        });
+      } else {
+        console.warn('gerk_segment label sync failed', segError);
+      }
+    }
   } catch (e) {
     // 23505 = unique_violation on (delovni_nalog_gerk_id, sample_no) — same
     // constraint as addSample, hit here if renamed to a number already in use.
@@ -3822,8 +3848,9 @@ async function confirmKmlImport(btn) {
         // custom/sub-divided codes with no registry match at all (e.g. a
         // large field split into "1526437_CH1", "1526437_MO7"...), which
         // otherwise show no Ha despite the zone geometry being right there.
+        const { data: segRows } = await supabase.from('gerk_segment').select('label, area_ha').eq('segmentation_id', segmentationId);
+        const areaByLabel = new Map((segRows || []).map(r => [r.label, Number(r.area_ha) || null]));
         if (!gerk.kolicina_ha) {
-          const { data: segRows } = await supabase.from('gerk_segment').select('area_ha').eq('segmentation_id', segmentationId);
           const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
           if (importedHa > 0) {
             const { error: haError } = await supabase.from('delovni_nalogi_gerki').update({ kolicina_ha: importedHa }).eq('id', gerk.id);
@@ -3832,18 +3859,33 @@ async function confirmKmlImport(btn) {
         }
 
         // Each imported zone also becomes its own segment (delovni_nalogi_vzorci
-        // row) on this GERK — its label (e.g. "10734") as the segment number —
-        // so it shows up in the same segment list as manually/pasted-in ones,
-        // not only as a shape on the map. Skips any label already present
-        // (re-importing the same file, or one already added by hand).
+        // row) on this GERK — its label (e.g. "10734") as the segment number,
+        // and the zone's own polygon area as that segment's area_ha (export
+        // granularity is per segment, so this needs to be set per row, not
+        // just summed into the GERK's kolicina_ha above) — so it shows up in
+        // the same segment list as manually/pasted-in ones, not only as a
+        // shape on the map. Skips any label already present (re-importing the
+        // same file, or one already added by hand).
         const existingSegmentNos = new Set((gerk.delovni_nalogi_vzorci || []).map(s => s.sample_no));
         const newSegmentRows = imp.segments
           .map(s => s.label)
           .filter(label => !existingSegmentNos.has(label))
-          .map(label => ({ delovni_nalog_gerk_id: gerk.id, sample_no: label, sampling_depth_cm: globina }));
+          .map(label => ({ delovni_nalog_gerk_id: gerk.id, sample_no: label, sampling_depth_cm: globina, area_ha: areaByLabel.get(label) ?? null }));
         if (newSegmentRows.length) {
-          const { error: segError } = await supabase.from('delovni_nalogi_vzorci').insert(newSegmentRows);
-          if (segError) console.warn('Napaka pri dodajanju segmentov iz uvoženih con:', segError);
+          const { data: insertedSegs, error: segError } = await supabase
+            .from('delovni_nalogi_vzorci')
+            .insert(newSegmentRows)
+            .select('id, sample_no, sampling_date, sending_date, sampling_note, sending_note, sampling_depth_cm, area_ha, comment');
+          if (segError) {
+            console.warn('Napaka pri dodajanju segmentov iz uvoženih con:', segError);
+          } else {
+            // Without this, the segments existed in the DB but the
+            // post-import re-render (loadDetailForDate(), below) read
+            // from this same stale in-memory array — not a fresh fetch
+            // — so newly imported segments stayed invisible until the
+            // order was closed and reopened.
+            gerk.delovni_nalogi_vzorci = [...(gerk.delovni_nalogi_vzorci || []), ...(insertedSegs || [])];
+          }
         }
 
         importedFiles++;
@@ -4148,14 +4190,30 @@ async function loadReportsData() {
   reportsListWrap.innerHTML = '<div class="state-loading"><div class="spinner"></div><p>Nalaganje...</p></div>';
   selectedReportIds = new Set();
   resetReportsStatusFilterDefault();
-  const { data, error } = await supabase.rpc('get_work_orders_report');
+  // second call: area of segments marked "ne pobereš" on completed GERKs
+  // (migration_report_not_sampled_ha.sql) — if it fails the report still
+  // works, only Vzorčeni ha falls back to Izvedeni ha
+  const [{ data, error }, notSampled] = await Promise.all([
+    supabase.rpc('get_work_orders_report'),
+    supabase.rpc('get_work_orders_not_sampled_ha'),
+  ]);
   if (error) {
     reportsError.textContent = 'Napaka pri nalaganju poročila: ' + error.message;
     reportsError.hidden = false;
     reportsListWrap.innerHTML = '';
     return;
   }
-  reportsData = data || [];
+  const skipped = new Map((notSampled.data || []).map(x => [x.work_order_id, x]));
+  if (notSampled.error) console.warn('get_work_orders_not_sampled_ha failed', notSampled.error);
+  reportsSampledHaCb.disabled = !!notSampled.error;
+  reportsSampledHaCb.checked = reportsUseSampledHa && !notSampled.error;
+  reportsData = (data || []).map(r => {
+    const x = skipped.get(r.work_order_id);
+    const notSampledHa = Number(x?.not_sampled_ha) || 0;
+    return { ...r, not_sampled_ha: notSampledHa, not_sampled_segments: x?.not_sampled_segments || 0,
+      missing_area_segments: x?.missing_area_segments || 0,
+      sampled_ha: Math.max((Number(r.executed_ha) || 0) - notSampledHa, 0) };
+  });
   populateReportsOperatorFilter();
   populateReportsCustomerFilter();
   renderReportsTable();
@@ -4225,11 +4283,17 @@ function updateReportsCustomerFilterButtonLabel() {
   reportsCustomerFilterBtn.title = n > 1 ? [...reportsCustomerValues].join(', ') : '';
 }
 
+// the ha the rates divide by — see reportsUseSampledHa
+function reportsHaBase(r) {
+  return Number(reportsUseSampledHa && !reportsSampledHaCb.disabled ? r.sampled_ha : r.executed_ha) || 0;
+}
+
 // Derived ratios shared by each order row and the totals row — totals
 // recompute these from the summed fields rather than averaging each row's
 // own ratio (averaging rates would be wrong), same principle already used
 // in updateReportsSummary(). Every ha-based rate uses executed_ha (GERKs
-// actually completed — start AND end time logged), not total_ha (every
+// with a completed time entry) — or sampled_ha, executed minus segments
+// marked "ne pobereš", when the checkbox is on — not total_ha (every
 // GERK assigned, including ones a "V delu" order hasn't touched yet) —
 // otherwise a part-done order's rates would be diluted by ha nobody has
 // worked. total_ha itself stays visible as its own column for context.
@@ -4238,7 +4302,7 @@ function reportsRowMetrics(r) {
   const roadMinutes = (r.road_traktor_minutes || 0) + (r.road_avto_minutes || 0);
   const hoursWithRoad = (r.tracked_minutes + roadMinutes) / 60;
   const workRoadTotal = r.tracked_minutes + roadMinutes;
-  const executedHa = r.executed_ha || 0;
+  const executedHa = reportsHaBase(r);
   return {
     perHour: hours > 0 ? (r.captures_count / hours).toFixed(2) : '—',
     perHa: executedHa > 0 ? (r.captures_count / executedHa).toFixed(2) : '—',
@@ -4255,10 +4319,13 @@ function reportsRowMetrics(r) {
 // rows are currently "in scope" (selected, or filtered if none selected) —
 // reportsRowMetrics() then turns this into the same ratio columns.
 function reportsAggregateRow(rowsForTotal) {
-  const agg = { total_ha: 0, executed_ha: 0, tracked_minutes: 0, gap_minutes: 0, total_minutes: 0, captures_count: 0, road_traktor_minutes: 0, road_avto_minutes: 0, strosek: 0 };
+  const agg = { total_ha: 0, executed_ha: 0, sampled_ha: 0, not_sampled_segments: 0, missing_area_segments: 0, tracked_minutes: 0, gap_minutes: 0, total_minutes: 0, captures_count: 0, road_traktor_minutes: 0, road_avto_minutes: 0, strosek: 0 };
   for (const r of rowsForTotal) {
     agg.total_ha += Number(r.total_ha) || 0;
     agg.executed_ha += Number(r.executed_ha) || 0;
+    agg.sampled_ha += Number(r.sampled_ha) || 0;
+    agg.not_sampled_segments += r.not_sampled_segments || 0;
+    agg.missing_area_segments += r.missing_area_segments || 0;
     agg.tracked_minutes += r.tracked_minutes || 0;
     agg.gap_minutes += r.gap_minutes || 0;
     agg.total_minutes += r.total_minutes || 0;
@@ -4377,7 +4444,7 @@ function renderReportsChart(rows) {
     const bucket = byDate.get(key) || { tracked: 0, gap: 0, ha: 0 };
     bucket.tracked += r.tracked_minutes || 0;
     bucket.gap += r.gap_minutes || 0;
-    bucket.ha += r.executed_ha || 0; // executed, not assigned — see reportsRowMetrics()' comment
+    bucket.ha += reportsHaBase(r); // executed (or sampled, per the checkbox), not assigned — see reportsRowMetrics()' comment
     byDate.set(key, bucket);
   });
   const dates = [...byDate.keys()].sort();
@@ -4548,6 +4615,14 @@ function wireReportsChartToolbar() {
   });
 }
 
+function reportsHaBaseIsSampled() { return reportsUseSampledHa && !reportsSampledHaCb.disabled; }
+// tooltip on Vzorčeni ha: how many skipped segments it leaves out
+function sampledTitle(r) {
+  if (!r.not_sampled_segments) return 'Brez segmentov »ne pobereš«';
+  return `Odšteto ${r.not_sampled_segments} segmentov »ne pobereš« (${((Number(r.executed_ha) || 0) - (Number(r.sampled_ha) || 0)).toFixed(2)} ha)`
+    + (r.missing_area_segments ? ` — ${r.missing_area_segments} brez znane površine (ni odšteto)` : '');
+}
+
 function renderReportsTable() {
   const rows = filteredReportsRows();
   updateReportsSummary(rows);
@@ -4558,6 +4633,8 @@ function renderReportsTable() {
     return;
   }
 
+  const haWord = reportsHaBaseIsSampled() ? 'vzorčeni ha' : 'izvedeni ha';
+  const haWordCap = haWord[0].toUpperCase() + haWord.slice(1);
   reportsListWrap.innerHTML = `
     <div class="reports-table-wrap">
       <table class="evidenca-table reports-data-table">
@@ -4569,17 +4646,18 @@ function renderReportsTable() {
             <th>Status</th>
             <th>Izvajalec</th>
             <th>Ha</th>
-            <th title="Ha od dodeljenih GERK-ov, ki imajo zabeležen začetni IN končni čas — pri delno opravljenem nalogu manj kot Ha">Izvedeni ha</th>
+            <th class="${reportsHaBaseIsSampled() ? '' : 'reports-col--base'}" title="Ha od dodeljenih GERK-ov, ki imajo zabeležen začetni IN končni čas — pri delno opravljenem nalogu manj kot Ha">Izvedeni ha</th>
+            <th class="${reportsHaBaseIsSampled() ? 'reports-col--base' : ''}" title="Izvedeni ha brez segmentov, označenih »ne pobereš« (Vzorčenje ali opomba)">Vzorčeni ha</th>
             <th title="Zabeležen čas">Zabeležen</th>
             <th title="Čas med GERK-i">Med GERK-i</th>
             <th title="Skupni čas">Skupaj</th>
             <th title="Zajete točke">Točke</th>
             <th>Točk / h</th>
-            <th title="Zajete točke / izvedeni ha">Točk / ha</th>
-            <th title="Izvedeni ha / zajeto točko">Ha / točko</th>
-            <th title="Zabeležen čas / izvedeni ha">Čas / ha</th>
-            <th title="Izvedeni ha na uro zabeleženega časa, brez poti">Ha/h</th>
-            <th title="Izvedeni ha na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
+            <th title="Zajete točke / ${haWord}">Točk / ha</th>
+            <th title="${haWordCap} / zajeto točko">Ha / točko</th>
+            <th title="Zabeležen čas / ${haWord}">Čas / ha</th>
+            <th title="${haWordCap} na uro zabeleženega časa, brez poti">Ha/h</th>
+            <th title="${haWordCap} na uro zabeleženega časa + poti (traktor + avto)">Ha/h s potjo</th>
             <th title="Prevoz s traktorjem (čas na poti)">Prevoz traktor</th>
             <th title="Prevoz z avtom (čas na poti)">Prevoz avto</th>
             <th title="Delež zabeleženega časa v skupnem času (delo + pot)">Delo / pot</th>
@@ -4597,6 +4675,7 @@ function renderReportsTable() {
               <td colspan="4">${escHtml(totalsLabel)}</td>
               <td>${totals.total_ha.toFixed(2)}</td>
               <td>${totals.executed_ha.toFixed(2)}</td>
+              <td title="${escHtml(sampledTitle(totals))}">${totals.sampled_ha.toFixed(2)}</td>
               <td>${fmtHM(totals.tracked_minutes)}</td>
               <td>${fmtHM(totals.gap_minutes)}</td>
               <td>${fmtHM(totals.total_minutes)}</td>
@@ -4624,6 +4703,7 @@ function renderReportsTable() {
               <td>${escHtml(r.izvajalec_name)}</td>
               <td>${Number(r.total_ha).toFixed(2)}</td>
               <td>${Number(r.executed_ha || 0).toFixed(2)}</td>
+              <td title="${escHtml(sampledTitle(r))}">${Number(r.sampled_ha || 0).toFixed(2)}</td>
               <td>${fmtHM(r.tracked_minutes)}</td>
               <td>${fmtHM(r.gap_minutes)}</td>
               <td>${fmtHM(r.total_minutes)}</td>
@@ -4683,6 +4763,11 @@ reportsStatusFilterMenu.querySelectorAll('.reports-status-filter-cb').forEach(cb
 reportsOperatorFilter.addEventListener('change', renderReportsTable);
 reportsDateFrom.addEventListener('change', renderReportsTable);
 reportsDateTo.addEventListener('change', renderReportsTable);
+reportsSampledHaCb.addEventListener('change', () => {
+  reportsUseSampledHa = reportsSampledHaCb.checked;
+  try { localStorage.setItem('reportsUseSampledHa', reportsUseSampledHa ? '1' : '0'); } catch { /* private mode */ }
+  renderReportsTable();
+});
 
 reportsCustomerFilterBtn.addEventListener('click', e => {
   e.stopPropagation();
@@ -5116,12 +5201,14 @@ function switchTab(tab) {
   tabEvidenca.classList.toggle('tab-btn--active', tab === 'evidenca');
   tabNalogi.classList.toggle('tab-btn--active', tab === 'nalogi');
   tabPlaniranje.classList.toggle('tab-btn--active', tab === 'planiranje');
+  tabGnojilni.classList.toggle('tab-btn--active', tab === 'gnojilni');
   // Poročila has no tab-bar button of its own (opened from the + menu) —
   // hide the whole bar rather than leave it showing with nothing active.
   tabBarEl.hidden         = tab === 'reports';
   panelEvidenca.hidden   = tab !== 'evidenca';
   panelNalogi.hidden     = tab !== 'nalogi';
   panelPlaniranje.hidden = tab !== 'planiranje';
+  panelGnojilni.hidden   = tab !== 'gnojilni';
   panelReports.hidden    = tab !== 'reports';
   updateFabVisibility();
   if (tab === 'nalogi' && !workOrdersLoaded) loadWorkOrders();
@@ -5147,6 +5234,7 @@ function closeReportsView() {
 function updateFabVisibility() {
   addBtn.hidden = !isAdminView();
   tabPlaniranje.hidden = !isAdminView();
+  tabGnojilni.hidden = !isAdminView();
 }
 
 // Renders the header's Admin/Regular view switch (admin-only) and
@@ -5168,7 +5256,7 @@ adminViewToggle.addEventListener('change', () => {
   adminViewActive = adminViewToggle.checked;
   localStorage.setItem('adminViewActive', adminViewActive ? '1' : '0');
   if (!isAdminView()) { woShowDeletedActive = false; clearWoSelection(); } // never leave the archived list or a bulk selection showing once out of Admin view
-  if (!isAdminView() && currentTab === 'planiranje') switchTab('nalogi'); // its tab button is about to hide — don't strand them on it
+  if (!isAdminView() && (currentTab === 'planiranje' || currentTab === 'gnojilni')) switchTab('nalogi'); // its tab button is about to hide — don't strand them on it
   renderAdminViewToggle();
   updateFabVisibility();
   updateShowDeletedButton();
@@ -5180,6 +5268,7 @@ adminViewToggle.addEventListener('change', () => {
 tabEvidenca.addEventListener('click',   () => switchTab('evidenca'));
 tabNalogi.addEventListener('click',     () => switchTab('nalogi'));
 tabPlaniranje.addEventListener('click', () => switchTab('planiranje'));
+tabGnojilni.addEventListener('click',   () => switchTab('gnojilni'));
 
 // ── Work orders: load + render ───────────────────────────────────
 function slugStatus(status) {
@@ -5715,11 +5804,15 @@ function buildWoSelectionBar() {
     <button type="button" class="wlg-sel-close" data-action="wo-sel-close" aria-label="Prekliči izbiro" title="Prekliči izbiro">${WLG_SEL_ICON_CLOSE}</button>
     <span class="wlg-sel-sep" aria-hidden="true"></span>
     <div class="wlg-sel-actions">
+      <button type="button" class="wlg-sel-action" data-action-id="wo-sel-export" aria-label="Izvozi izbrane naloge v Excel" title="Izvozi izbrane naloge v Excel">
+        ${WLG_SEL_ICON_DOWNLOAD}<span class="wlg-sel-action-label">Izvozi</span>
+      </button>
       <button type="button" class="wlg-sel-action wlg-sel-action--danger" data-action-id="wo-sel-delete" aria-label="Izbriši izbrane naloge" title="Izbriši izbrane naloge">
         ${WLG_SEL_ICON_TRASH}<span class="wlg-sel-action-label">Izbriši</span>
       </button>
     </div>`;
   woSelectionBar.querySelector('[data-action="wo-sel-close"]').addEventListener('click', clearWoSelection);
+  woSelectionBar.querySelector('[data-action-id="wo-sel-export"]').addEventListener('click', e => exportSelectedWorkOrdersToExcel(e.currentTarget));
   woSelectionBar.querySelector('[data-action-id="wo-sel-delete"]').addEventListener('click', e => bulkDeleteSelectedWorkOrders(e.currentTarget));
 }
 buildWoSelectionBar();
@@ -5752,6 +5845,61 @@ async function bulkDeleteSelectedWorkOrders(btn) {
   if (error) { alert(error.message || 'Napaka pri brisanju nalogov.'); return; }
   clearWoSelection();
   await loadWorkOrders();
+}
+
+// CSV, not a real .xlsx — Excel opens it directly, no binary format/library
+// needed. Semicolon separator + UTF-8 BOM: Slovenian-locale Excel treats
+// comma as the decimal separator, so a comma-delimited CSV mis-splits
+// columns, and without the BOM č/š/ž render as mojibake.
+function csvField(value) {
+  const s = value == null ? '' : String(value);
+  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// A plain dot-decimal like "8.23" opens in Excel as a date serial (it reads
+// the dot as an ambiguous date separator) — formatting with a comma instead
+// matches the semicolon-CSV's own locale convention and avoids that misparse.
+function csvHa(value) {
+  return value == null ? '' : Number(value).toFixed(2).replace('.', ',');
+}
+
+// One row per segment — not per GERK — since export granularity needs to
+// show each segment's own area, not just the GERK total (a GERK split into
+// several KML-imported zones has a different Ha per zone). Falls back to
+// one row per GERK (using the GERK's own kolicina_ha) only when it has no
+// segments at all.
+function exportSelectedWorkOrdersToExcel(btn) {
+  const orders = workOrders.filter(wo => selectedWorkOrderIds.has(wo.id));
+  if (!orders.length) return;
+
+  btn.disabled = true;
+  try {
+    const header = ['Št. naloga', 'Datum', 'Stranka', 'Status', 'Izvajalec', 'GERK', 'Segment', 'Ha'];
+    const lines = [header.map(csvField).join(';')];
+
+    for (const wo of orders) {
+      const datum = wo.ustvarjen ? fmtSampleDate(wo.ustvarjen.slice(0, 10)) : '';
+      const stranka = wo.customers?.naziv || wo.customers?.company_name || '';
+      const izvajalec = wo.profiles?.full_name || '';
+      const base = [wo.stevilka || '', datum, stranka, wo.status || '', izvajalec];
+      const gerks = wo.delovni_nalogi_gerki || [];
+      for (const g of gerks) {
+        const segments = g.delovni_nalogi_vzorci || [];
+        if (!segments.length) {
+          lines.push([...base, g.gerk_code || '', '', csvHa(g.kolicina_ha)].map(csvField).join(';'));
+        } else {
+          for (const s of segments) {
+            lines.push([...base, g.gerk_code || '', s.sample_no || '', csvHa(s.area_ha)].map(csvField).join(';'));
+          }
+        }
+      }
+    }
+
+    const csv = '﻿' + lines.join('\r\n');
+    downloadTextFile(`delovni_nalogi_${todayISO()}.csv`, csv, 'text/csv;charset=utf-8');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function updateWoSearchClearBtn() {
@@ -6095,13 +6243,14 @@ async function confirmNewKmlImport(btn) {
         // instead of showing nothing.
         const known = fields.find(f => f.code === gerkCode);
         let hectares = known?.area ?? null;
+        const { data: segRows } = await supabase.from('gerk_segment').select('label, area_ha').eq('segmentation_id', segmentationId);
         if (!hectares) {
-          const { data: segRows } = await supabase.from('gerk_segment').select('area_ha').eq('segmentation_id', segmentationId);
           const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
           if (importedHa > 0) hectares = importedHa;
         }
+        const areaByLabel = new Map((segRows || []).map(r => [r.label, Number(r.area_ha) || null]));
         const row = ensureGerkRowForPaste(gerkCode, hectares);
-        if (row) addGerkSegments(row, imp.segments.map(s => ({ fms: null, sampleNo: s.label, vzorcenje: null })));
+        if (row) addGerkSegments(row, imp.segments.map(s => ({ fms: null, sampleNo: s.label, vzorcenje: null, areaHa: areaByLabel.get(s.label) ?? null })));
 
         importedFiles++;
       } catch (e) {
@@ -6613,6 +6762,7 @@ workOrderForm.addEventListener('submit', async e => {
       sample_no:     s.sampleNo,
       fms:           s.fms,
       sampling_note: s.vzorcenje || null,
+      area_ha:       s.areaHa ?? null,
     }))
   );
 
