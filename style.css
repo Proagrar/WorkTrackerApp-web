@@ -674,6 +674,33 @@ input, select, textarea { font-family: inherit; }
 .wo-c-maps { display: none; }
 .wo-c-maps--empty { color: var(--text-muted); }
 
+/* "Pripravi račun" trigger + status (Matej, 2026-11-09: icon-only, lives in
+   "Sledenje naročilom" / shipping.js now, not here) — .wo-invoice-* classes
+   below are shared across both modules via this one stylesheet. */
+.wo-c-invoice--empty { color: var(--text-muted); }
+.wo-invoice-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: .9375rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.wo-invoice-btn--pending { opacity: .7; }
+.wo-invoice-btn--error { color: var(--danger); }
+.wo-invoice-number {
+  font-size: .75rem;
+  font-weight: 600;
+  color: #6D28D9;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wo-invoice-number--storniran { color: var(--danger); text-decoration: line-through; }
+.wo-invoice-number--paid { color: var(--success); }
+
 
 /* ── Work log: work-order label + compact GERK entry table ──── */
 .wo-order-label {
@@ -1146,6 +1173,20 @@ input, select, textarea { font-family: inherit; }
 
 .wlg-gerk-label-row { display: flex; align-items: center; gap: 8px; }
 .wlg-select-all-label { display: flex; align-items: center; cursor: pointer; }
+.wlg-search-input {
+  margin-left: auto;
+  width: 140px;
+  max-width: 45%;
+  padding: 4px 8px;
+  font-size: .8125rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+/* Hidden by the search filter — !important so it wins over the mobile
+   pager's own `hidden` toggling on the same .wlg-row elements. */
+.wlg-row--search-hidden { display: none !important; }
 
 /* Both ways to add more GERKs to an existing order, grouped at the end of
    the GERK list: the shared paste textarea on top, both trigger buttons
@@ -1158,6 +1199,10 @@ input, select, textarea { font-family: inherit; }
   gap: 12px;
   margin-top: 8px;
 }
+
+/* Obnovi/Izbriši nalog — same row as the two buttons above, pushed to
+   the far right (only one of the two is ever visible at once). */
+.wlg-gerk-row-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 .wlg-import-zones { margin: 0; }
 
@@ -1253,6 +1298,39 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   color: var(--text-secondary);
 }
 .wo-header-meta:empty { display: none; }
+
+/* ── "Pripravi račun" review modal ───────────────────────────── */
+.invoice-preview-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.invoice-preview-fields > div { display: contents; }
+.invoice-preview-fields dt { color: var(--text-secondary); font-size: .8125rem; }
+.invoice-preview-fields dd { margin: 0; font-weight: 600; }
+.invoice-preview-note {
+  font-size: .8125rem;
+  color: var(--text-secondary);
+  background: var(--bg-subtle, var(--border-light));
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.invoice-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8125rem;
+}
+.invoice-preview-table th, .invoice-preview-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+.invoice-preview-table tfoot td { font-weight: 700; border-bottom: none; }
+.invoice-preview-meta {
+  font-size: .8125rem;
+  color: var(--text-secondary);
+}
 
 /* ── Greeting ───────────────────────────────────────────────── */
 .greeting-section {
@@ -1369,8 +1447,6 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   font-size: .8125rem;
   flex-shrink: 0;
 }
-
-.reports-row-checkbox-col { width: 32px; }
 
 /* Poročila stacked bar chart — total time per date, split Zabeležen /
    Pot med GERK-i. Colors are the dataviz skill's validated categorical
@@ -2497,16 +2573,12 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
      worth the vertical space it eats on a phone-width map. */
   #woDetailMap .leaflet-control-attribution { display: none; }
 
-  /* GERK list admin tools (KML import, paste-to-add, sampling export)
-     and the bottom action row (Zaključi delo/Izbriši nalog) all assume
-     real screen width and don't fit the phone's one-GERK-at-a-time
-     card — hidden here. Nothing is left below the map except the
-     opomba field (relocated right below it, see
+  /* GERK list admin tools (KML import, paste-to-add, Obnovi/Izbriši
+     nalog) assume real screen width and don't fit the phone's
+     one-GERK-at-a-time card — hidden here. Nothing is left below the
+     map except the opomba field (relocated right below it, see
      .wo-detail-layout > #roadComment above) and the GERK list itself. */
-  #woImportZonesWrap,
-  #woAddExistingGerkWrap,
-  #woExportSamplingWrap,
-  #formModal .form-actions {
+  #woAddExistingGerkWrap {
     display: none;
   }
 
@@ -3049,6 +3121,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 }
 
 .decl-customer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 14px;
   font-size: .9375rem;
   color: var(--text-primary);
@@ -3058,6 +3133,10 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .decl-customer-row:last-child { border-bottom: none; }
 .decl-customer-row:hover,
 .decl-customer-row:active { background: var(--blue-50); }
+.decl-customer-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decl-customer-edit-btn { flex-shrink: 0; width: 32px; height: 32px; font-size: .9375rem; }
+
+.edit-customer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-5); align-items: start; }
 
 .decl-customer-info {
   margin: 4px 0 16px;
@@ -3254,7 +3333,6 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .fert-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
 .fert-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 240px; }
 .fert-input { height: 40px; }
-.fert-check { display: inline-flex; align-items: center; gap: var(--space-3); height: 40px; padding: 0 var(--space-5); background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius-md); font-size: .875rem; }
 
 .fert-notice { padding: var(--space-4) var(--space-6); border-radius: var(--radius-sm); font-size: .875rem; line-height: 1.45; }
 .fert-notice + .fert-notice { margin-top: var(--space-3); }
@@ -3263,7 +3341,6 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .fert-notice--ok   { background: var(--success-bg); color: #15803D; }
 
 .fert-table td.fert-num, .fert-table th.fert-num { text-align: right; font-variant-numeric: tabular-nums; }
-.fert-table--compact th, .fert-table--compact td { padding: 7px 12px; }
 .fert-strong { font-weight: 600; }
 .fert-muted { color: var(--text-secondary); }
 .fert-hint { margin: 0; font-size: .8125rem; color: var(--text-secondary); }
@@ -3274,6 +3351,31 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .fert-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
 .fert-badge--ok   { background: var(--success-bg); color: #15803D; }
 .fert-badge--warn { background: var(--warning-bg); color: var(--warning); }
+.fert-badge--neutral { background: var(--border-light); color: var(--text-secondary); }
+.fert-badge--sent { background: #EDE9FE; color: #6D28D9; }
+.fert-badge--danger { background: var(--error-bg, #FEE2E2); color: var(--danger); }
+
+/* ── Sledenje naročilom (shipping.js) ────────────────────────── */
+.sled-gerk-group { margin-bottom: var(--space-6); }
+.sled-gerk-title { font-size: .9375rem; font-weight: 700; margin: 0 0 var(--space-3); }
+.sled-seg-row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-light); }
+.sled-seg-row:last-child { border-bottom: none; }
+.sled-seg-sample { font-weight: 600; min-width: 90px; }
+.sled-seg-box-select { flex: 1; max-width: 280px; }
+.sled-seg-sampling { display: flex; align-items: center; gap: 4px; font-size: .8125rem; color: var(--text-secondary); white-space: nowrap; }
+.sled-order-boxes-wrap { margin-top: var(--space-6); }
+.evidenca-table.fert-table tbody tr[data-open-order] { cursor: pointer; }
+.sled-row-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+/* Status/invoice used to be stacked into one cell (badge + stepper +
+   invoice badge + icon), which is what was actually getting clipped on a
+   narrow window — not a scroll-position issue, a cropped-text one (Matej,
+   2026-11-09). Split into their own plain columns instead (Status+stepper,
+   Račun, action icon) so each cell sizes to its own content and nothing is
+   ever cropped; the table still scrolls horizontally via
+   .reports-table-wrap on a narrow window, same as any other wide table. */
+.sled-status-cell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sled-status-stepper { display: block; }
+.sled-invoice-icon-col { text-align: center; }
 .fert-link-btn { height: 30px; padding: 0 10px; }
 .fert-pick-list { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); white-space: normal; }
 
@@ -3295,10 +3397,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .fert-count--warn { color: var(--warning); }
 .fert-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-4); }
 
-.fert-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-7); align-items: start; }
 .fert-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: var(--space-2); }
 .fert-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: var(--space-2); background: var(--background); border-radius: var(--radius-sm); font-size: .8125rem; }
-@media (max-width: 420px) { .fert-settings-grid { grid-template-columns: 1fr; } .fert-field { min-width: 0; flex: 1 1 100%; } }
+@media (max-width: 420px) { .fert-field { min-width: 0; flex: 1 1 100%; } }
 /* Admins now get four tabs (Nalogi, Evidenca, Planiranje, Gnojilni načrt) —
    on a phone let them wrap into two rows instead of squeezing four labels
    into one; operators' two tabs still sit side by side. */

@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v4.32';
+const APP_VERSION = 'v4.57';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -118,6 +118,19 @@ const woCaptureToast = document.getElementById('woCaptureToast');
 const woCaptureShowPoints = document.getElementById('woCaptureShowPoints');
 const woCaptureList = document.getElementById('woCaptureList');
 const woHeaderMeta = document.getElementById('woHeaderMeta');
+const invoicePreviewModal = document.getElementById('invoicePreviewModal');
+const invoicePreviewClose = document.getElementById('invoicePreviewClose');
+const invoicePreviewWarning = document.getElementById('invoicePreviewWarning');
+const ipNalog = document.getElementById('ipNalog');
+const ipStranka = document.getElementById('ipStranka');
+const ipVat = document.getElementById('ipVat');
+const ipMinimaxId = document.getElementById('ipMinimaxId');
+const ipSklic = document.getElementById('ipSklic');
+const ipGerkRows = document.getElementById('ipGerkRows');
+const ipGerkTotal = document.getElementById('ipGerkTotal');
+const ipMeta = document.getElementById('ipMeta');
+const invoicePreviewCancelBtn = document.getElementById('invoicePreviewCancelBtn');
+const invoicePreviewConfirmBtn = document.getElementById('invoicePreviewConfirmBtn');
 const roadTypeSel = document.getElementById('roadType');
 const roadHourSel = document.getElementById('roadHour');
 const roadMinSel  = document.getElementById('roadMin');
@@ -127,6 +140,8 @@ const roadTimeListEl = document.getElementById('roadTimeList');
 const workLogGerkRowsEl = document.getElementById('workLogGerkRows');
 const wlgSelectAllWrap = document.getElementById('wlgSelectAllWrap');
 const wlgSelectAllCheckbox = document.getElementById('wlgSelectAllCheckbox');
+const wlgSearchInput = document.getElementById('wlgSearchInput');
+const wlgSearchNoResults = document.getElementById('wlgSearchNoResults');
 const woGerkPagerEl       = document.getElementById('woGerkPager'); // phone-only — see updateGerkPaging()
 const woGerkPagerLabelEl  = document.getElementById('woGerkPagerLabel');
 const woGerkPagerPrevBtn  = document.getElementById('woGerkPagerPrev');
@@ -136,7 +151,6 @@ const tractorInput = document.getElementById('tractor');
 const descInput   = document.getElementById('description');
 const formError   = document.getElementById('formError');
 const formSuccess = document.getElementById('formSuccess');
-const cancelBtn   = document.getElementById('cancelBtn');
 
 // ── Tabs ───────────────────────────────────────────────────────
 const tabBarEl        = document.querySelector('.tab-bar');
@@ -144,10 +158,12 @@ const tabEvidenca     = document.getElementById('tabEvidenca');
 const tabNalogi       = document.getElementById('tabNalogi');
 const tabPlaniranje   = document.getElementById('tabPlaniranje');
 const tabGnojilni     = document.getElementById('tabGnojilni');
+const tabSledenje     = document.getElementById('tabSledenje');
 const panelEvidenca   = document.getElementById('panelEvidenca');
 const panelNalogi     = document.getElementById('panelNalogi');
 const panelPlaniranje = document.getElementById('panelPlaniranje');
 const panelGnojilni   = document.getElementById('panelGnojilni');
+const panelSledenje   = document.getElementById('panelSledenje');
 const workOrdersList = document.getElementById('workOrdersList');
 const woHaChipTotal = document.getElementById('woHaChipTotal');
 const woHaChipIzvedeno = document.getElementById('woHaChipIzvedeno');
@@ -219,6 +235,29 @@ const declTableWrap          = document.getElementById('declTableWrap');
 const declAddCustomerBtn     = document.getElementById('declAddCustomerBtn');
 let declCustomerId = null;
 
+const editCustomerModal      = document.getElementById('editCustomerModal');
+const editCustomerModalClose = document.getElementById('editCustomerModalClose');
+const editCustomerForm       = document.getElementById('editCustomerForm');
+const editCustomerErrorEl    = document.getElementById('editCustomerError');
+const editCustomerSaveBtn    = document.getElementById('editCustomerSaveBtn');
+const editCustomerCancelBtn  = document.getElementById('editCustomerCancelBtn');
+const editCustNaziv        = document.getElementById('editCustNaziv');
+const editCustCompanyName  = document.getElementById('editCustCompanyName');
+const editCustContact      = document.getElementById('editCustContact');
+const editCustEmail        = document.getElementById('editCustEmail');
+const editCustPhone        = document.getElementById('editCustPhone');
+const editCustVat          = document.getElementById('editCustVat');
+const editCustStreet       = document.getElementById('editCustStreet');
+const editCustPostCode     = document.getElementById('editCustPostCode');
+const editCustCity         = document.getElementById('editCustCity');
+const editCustCountry      = document.getElementById('editCustCountry');
+const editCustRegion       = document.getElementById('editCustRegion');
+const editCustSalesPerson  = document.getElementById('editCustSalesPerson');
+const editCustPartnerId    = document.getElementById('editCustPartnerId');
+const editCustNotes        = document.getElementById('editCustNotes');
+const editCustMinimaxId    = document.getElementById('editCustMinimaxId');
+let editCustomerId = null;
+
 // ── Poročila (reports) full-screen view refs ────────────────────
 const panelReports            = document.getElementById('panelReports');
 const reportsBackBtn          = document.getElementById('reportsBackBtn');
@@ -266,6 +305,7 @@ const addCustomerForm       = document.getElementById('addCustomerForm');
 const newCustomerNazivInput = document.getElementById('newCustomerNaziv');
 const newCustomerKrajInput  = document.getElementById('newCustomerKraj');
 const newCustomerCountryInput = document.getElementById('newCustomerCountry');
+const newCustomerVatInput   = document.getElementById('newCustomerVat');
 const addCustomerErrorEl    = document.getElementById('addCustomerError');
 const addCustomerCancelBtn  = document.getElementById('addCustomerCancelBtn');
 const addCustomerSaveBtn    = document.getElementById('addCustomerSaveBtn');
@@ -958,6 +998,13 @@ function fmtClock(iso) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// d.m.yyyy HH:MM, local time — used for the invoice-request timestamp.
+function fmtDateTimeSl(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()} ${fmtClock(iso)}`;
+}
+
 // Short d.m.yyyy for the samples panel; dash for unset dates (common in
 // the historical import — sampling/sending dates weren't always recorded).
 function fmtSampleDate(isoDate) {
@@ -1199,7 +1246,10 @@ function layoutWoDetailSections() {
 // admin multi-select) keeps working completely unchanged.
 let woGerkPageIndex = 0;
 function updateGerkPaging() {
-  const rows = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row'));
+  // Rows hidden by the search filter (.wlg-row--search-hidden) are excluded
+  // from paging entirely — they stay hidden via CSS regardless of what this
+  // sets on `hidden` below.
+  const rows = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row:not(.wlg-row--search-hidden)'));
   const n = rows.length;
   if (!isMobile() || woMapExpanded || !n) {
     rows.forEach(r => { r.hidden = false; });
@@ -1213,6 +1263,25 @@ function updateGerkPaging() {
   woGerkPagerPrevBtn.disabled = woGerkPageIndex === 0;
   woGerkPagerNextBtn.disabled = woGerkPageIndex === n - 1;
 }
+
+// Filters the current order's own GERK list by code or name — scoped to
+// workLogGerkRowsEl only, never touches any other GERK list in the app.
+function applyGerkSearch() {
+  const term = wlgSearchInput.value.trim().toLowerCase();
+  const rows = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row'));
+  let visibleCount = 0;
+  rows.forEach(r => {
+    const code = (r.dataset.code || '').toLowerCase();
+    const name = (r.querySelector('.wlg-name')?.textContent || '').toLowerCase();
+    const matches = !term || code.includes(term) || name.includes(term);
+    r.classList.toggle('wlg-row--search-hidden', !matches);
+    if (matches) visibleCount++;
+  });
+  wlgSearchNoResults.hidden = !(term && visibleCount === 0);
+  woGerkPageIndex = 0;
+  updateGerkPaging();
+}
+wlgSearchInput.addEventListener('input', applyGerkSearch);
 woGerkPagerPrevBtn.addEventListener('click', () => {
   if (woGerkPageIndex > 0) { woGerkPageIndex--; updateGerkPaging(); }
 });
@@ -1230,6 +1299,7 @@ function renderWorkLogGerkRows(rows) {
   if (!rows.length) {
     workLogGerkRowsEl.innerHTML = `<p class="field-hint">Ta delovni nalog nima dodanih GERKOV.</p>`;
     updateGerkSelectionBar();
+    wlgSearchNoResults.hidden = true;
     updateGerkPaging();
     return;
   }
@@ -1300,8 +1370,7 @@ function renderWorkLogGerkRows(rows) {
   wlgSelectAllWrap.hidden = !isAdminView();
   updateWlgSelectAllCheckbox();
   if (woMapExpanded) renderCompactGerkList();
-  woGerkPageIndex = 0;
-  updateGerkPaging();
+  applyGerkSearch();
 }
 
 // Keeps the "Izberi vse" checkbox's checked/indeterminate state matching
@@ -1546,6 +1615,138 @@ function updateOrderHeader() {
   buildWoHeaderSummary();
 }
 
+// "Pripravi račun" lives in the work-orders list (one icon/number cell
+// per row — see renderWoInvoiceCell()), not in the detail view. The app
+// only ever writes racun_zahtevan_at/by: a separate script (not this
+// app) polls that, creates the Minimax draft, and fills in
+// minimax_racun_*/racun_napaka.
+let invoicePreviewWorkOrder = null;
+
+// First-time request only — opens a review modal summarizing exactly
+// what the separate Minimax sync script will have to work with, so an
+// admin can catch a wrong order/missing Minimax customer match before a
+// draft gets created. A retry after an error reuses the same write but
+// skips the modal (already reviewed once — see wo-invoice-retry below).
+function openInvoicePreviewModal(wo) {
+  invoicePreviewWorkOrder = wo;
+  const customerName = wo.customers?.naziv || wo.customers?.company_name || '—';
+  const minimaxId = wo.customers?.minimax_customer_id;
+  const vatNumber = wo.customers?.vat_number;
+
+  ipNalog.textContent = wo.stevilka || '—';
+  ipStranka.textContent = customerName;
+  ipVat.textContent = vatNumber || '—';
+  ipMinimaxId.textContent = minimaxId || 'ni nastavljen';
+  ipSklic.textContent = `DN ${wo.stevilka || ''}`.trim();
+
+  // The real ERP↔Minimax customer link is the davčna številka — if the
+  // customer has one, the sync script looks it up in Minimax and creates
+  // it there if missing. Minimax ID is only a manual override for when
+  // that lookup can't find/create a match on its own. So only warn when
+  // BOTH are missing — nothing to match or create a customer from at all.
+  invoicePreviewWarning.hidden = !!minimaxId || !!vatNumber;
+  if (!minimaxId && !vatNumber) {
+    invoicePreviewWarning.textContent = 'Stranka nima ne davčne številke ne Minimax ID-ja — priprava osnutka bo verjetno spodletela. Dopolnite enega od njiju na kartici stranke (Seznam strank → uredi), ali nadaljujte in popravite kasneje.';
+  }
+
+  const gerks = wo.delovni_nalogi_gerki || [];
+  ipGerkRows.innerHTML = gerks.map(g => `
+    <tr><td>${escHtml(g.gerk_code || '—')}</td><td>${fmtHa(g.kolicina_ha)}</td></tr>`
+  ).join('') || '<tr><td colspan="2">Brez GERK-ov.</td></tr>';
+  const totalHa = gerks.reduce((s, g) => s + (Number(g.kolicina_ha) || 0), 0);
+  ipGerkTotal.textContent = fmtHa(totalHa);
+
+  // Accurate per-GERK duration only exists once the detail view has
+  // loaded it (currentAllGerkEntries); triggered straight from the list,
+  // the list's own already-computed total (workOrderDurations) is close
+  // enough for a last-look summary — this isn't the source of truth for
+  // anything, just a sanity check before the request goes out.
+  const totalMin = currentDetailWorkOrder?.id === wo.id
+    ? Math.round(Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row')).reduce((s, r) => s + (parseInt(r.dataset.duration, 10) || 0), 0) / 60)
+    : (workOrderDurations[wo.id] || 0);
+  const contributors = currentDetailWorkOrder?.id === wo.id
+    ? [...new Set(currentAllGerkEntries.map(e => e.work_logs.profiles?.full_name).filter(Boolean))]
+    : [wo.profiles?.full_name].filter(Boolean);
+  ipMeta.textContent = [
+    contributors.length ? `Izvaja: ${contributors.join(', ')}` : null,
+    totalMin > 0 ? `Skupaj ur: ${fmtHM(totalMin)}` : null,
+  ].filter(Boolean).join(' · ');
+
+  showModalAnimated(invoicePreviewModal);
+}
+
+function closeInvoicePreviewModal() {
+  hideModalAnimated(invoicePreviewModal);
+  invoicePreviewWorkOrder = null;
+}
+
+invoicePreviewClose.addEventListener('click', closeInvoicePreviewModal);
+invoicePreviewCancelBtn.addEventListener('click', closeInvoicePreviewModal);
+invoicePreviewModal.addEventListener('click', e => { if (e.target === invoicePreviewModal) closeInvoicePreviewModal(); });
+
+invoicePreviewConfirmBtn.addEventListener('click', async () => {
+  const wo = invoicePreviewWorkOrder;
+  if (!wo) return;
+  invoicePreviewConfirmBtn.disabled = true;
+  invoicePreviewConfirmBtn.querySelector('.btn-label').hidden = true;
+  invoicePreviewConfirmBtn.querySelector('.btn-spinner').hidden = false;
+  const { error } = await supabase
+    .from('delovni_nalogi')
+    .update({ racun_zahtevan_at: new Date().toISOString(), racun_zahtevan_by: currentUser.id, racun_napaka: null })
+    .eq('id', wo.id)
+    .eq('status', 'Izvedeno')
+    .is('deleted_at', null)
+    .is('minimax_racun_id', null);
+  invoicePreviewConfirmBtn.disabled = false;
+  invoicePreviewConfirmBtn.querySelector('.btn-label').hidden = false;
+  invoicePreviewConfirmBtn.querySelector('.btn-spinner').hidden = true;
+  if (error) { closeInvoicePreviewModal(); return alert('Napaka pri zahtevi za račun.'); }
+  wo.racun_zahtevan_at = new Date().toISOString();
+  wo.racun_napaka = null;
+  closeInvoicePreviewModal();
+  window.sledenjeRefreshOrders?.();
+});
+
+// Direct (no modal) — already reviewed once via the preview modal; this
+// just resubmits the same request after Minimax sync reported an error.
+async function retryInvoiceRequest(wo) {
+  const { error } = await supabase
+    .from('delovni_nalogi')
+    .update({ racun_napaka: null, racun_zahtevan_at: new Date().toISOString() })
+    .eq('id', wo.id);
+  if (error) return alert('Napaka pri ponovnem poskusu.');
+  wo.racun_napaka = null;
+  wo.racun_zahtevan_at = new Date().toISOString();
+  window.sledenjeRefreshOrders?.();
+}
+
+// Direct (no modal) — withdraws a not-yet-processed request; blocked by
+// the is('minimax_racun_id', null) once the sync script has picked it up.
+async function cancelInvoiceRequest(wo) {
+  if (!confirm(`Preklicati zahtevo za račun za nalog ${wo.stevilka}?`)) return;
+  const { error } = await supabase
+    .from('delovni_nalogi')
+    .update({ racun_zahtevan_at: null, racun_zahtevan_by: null })
+    .eq('id', wo.id)
+    .is('minimax_racun_id', null);
+  if (error) return alert('Napaka pri preklicu.');
+  wo.racun_zahtevan_at = null;
+  wo.racun_zahtevan_by = null;
+  window.sledenjeRefreshOrders?.();
+}
+
+// "Pripravi račun" (trigger + status) no longer shows in this list at all
+// (Matej, 2026-11-09) — it moved to "Sledenje naročilom" (shipping.js),
+// icon-only. The real logic (the three functions above) still lives here;
+// shipping.js reaches it through this bridge, same pattern as planning.js's
+// window.openWorkOrderDetailById. sledenjeRefreshOrders (set by shipping.js
+// itself, only once that tab has actually loaded) lets the three functions
+// above refresh that list after a successful write without this module
+// knowing anything about shipping.js's internals.
+window.openInvoicePreviewModal = openInvoicePreviewModal;
+window.retryInvoiceRequest = retryInvoiceRequest;
+window.cancelInvoiceRequest = cancelInvoiceRequest;
+
 // ── Modal ──────────────────────────────────────────────────────
 let currentDetailWorkOrder = null;
 let currentDetailLogId     = null;
@@ -1554,6 +1755,7 @@ let currentRoadTimeEntries = [];
 let currentAllGerkEntries  = []; // every operator's work_log_gerks for this work order — powers the "who else worked on this" view
 let currentCapturedPoints  = []; // gerk_captured_point rows for this work order — the right-side map capture panel
 let currentGerkSegments    = []; // get_work_order_gerk_segments rows — one per imported zone, powers the per-GERK badge + map layer
+let currentGerkShapes      = []; // get_work_order_gerk_shapes rows — official ARKOD registry boundary per GERK code, fallback for the ZIP export when there's no KML-imported zone
 let woMapSegmentLabelLayers = new Map(); // segment_id -> its permanent map label tooltip layer, so renaming a segment (updateSampleNo) can patch it live
 let woMapSegmentPointLayers = new Map(); // segment_id -> [{ layer, pointNo }] captured-point markers, same reason
 let selectedGerkCodes      = new Set(); // admin-only multi-select on the GERK list, powers the contextual selection bar
@@ -1591,6 +1793,8 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   setWorkLogDate(currentDetailDate);
 
   woAddExistingGerkPaste.value = '';
+  wlgSearchInput.value = '';
+  wlgSearchNoResults.hidden = true;
   if (isAdminView()) loadPlanDateForDetail(workOrder.id, planId); // fire-and-forget, re-renders the header itself once resolved
   if (isAdminView()) loadIzvajalecEditOptions(); // fire-and-forget, same — see below
 
@@ -1770,6 +1974,7 @@ async function showWoDetailMap(workOrder) {
   woMapCapturedLayer.clearLayers();
   currentCapturedPoints = [];
   currentGerkSegments = [];
+  currentGerkShapes = [];
   woMapSegmentLabelLayers = new Map();
   woMapSegmentPointLayers = new Map();
   woCaptureList.innerHTML = '';
@@ -1855,6 +2060,7 @@ async function showWoDetailMap(workOrder) {
   renderCapturedPointsList();
 
   currentGerkSegments = segments || [];
+  currentGerkShapes = shapes || [];
   renderGerkSegmentationInfo();
 
   // When a GERK has an imported KML zone, that shape wins outright — the
@@ -2779,7 +2985,7 @@ const WLG_SEL_ICON_ZIP = `<svg width="16" height="16" viewBox="0 0 20 20" fill="
 // it's wanted back.
 const GERK_SELECTION_ACTIONS = [
   { id: 'export',     label: 'Izvozi',      tooltip: 'Izvozi izbrane GERKE v Excel',                 icon: WLG_SEL_ICON_DOWNLOAD, variant: 'default', onClick: exportSelectedGerksToExcel },
-  { id: 'export-shp', label: 'ZIP',          tooltip: 'Izvozi cone vzorčenja izbranih GERKOV (shapefile/NextFarm)', icon: WLG_SEL_ICON_ZIP, variant: 'default', onClick: exportSelectedGerksToShapefile },
+  { id: 'export-shp', label: 'ZIP',          tooltip: 'Izvozi meje izbranih GERKOV (shapefile/NextFarm) — cona vzorčenja, če obstaja, sicer uradna meja GERK-a', icon: WLG_SEL_ICON_ZIP, variant: 'default', onClick: exportSelectedGerksToShapefile },
   { id: 'delete',     label: 'Briši',       tooltip: 'Izbriši izbrane GERKE iz naloga',              icon: WLG_SEL_ICON_TRASH,    variant: 'danger',  onClick: bulkDeleteSelectedGerks },
 ];
 
@@ -3301,6 +3507,15 @@ function exportSelectedGerksToShapefile(btn) {
     .filter(seg => codes.includes(seg.gerk_code) && seg.segment_geojson)
     .sort((a, b) => a.gerk_code.localeCompare(b.gerk_code, 'sl') || (a.segment_label || '').localeCompare(b.segment_label || '', 'sl'));
 
+  // Selected codes with no KML-imported zone fall back to the official
+  // ARKOD registry boundary (currentGerkShapes, same source the map
+  // itself draws when there's no zone) instead of being silently
+  // skipped — a compound code can have more than one row here.
+  const zonedCodes = new Set(zones.map(z => z.gerk_code));
+  const fallbackShapes = currentGerkShapes
+    .filter(row => codes.includes(row.gerk_code) && row.geojson && !zonedCodes.has(row.gerk_code))
+    .sort((a, b) => a.gerk_code.localeCompare(b.gerk_code, 'sl'));
+
   const features = [];
   const rows = [];
   let id = 1;
@@ -3318,8 +3533,21 @@ function exportSelectedGerksToShapefile(btn) {
       FLAECHE_HA: zoneAreaHa(seg, rings),
     });
   }
+  for (const shape of fallbackShapes) {
+    const rings = geojsonRingsLonLat(shape.geojson).map(ring => ring.map(([lon, lat]) => wgs84ToUtm33N(lon, lat)));
+    if (!rings.length) continue;
+    features.push({ rings });
 
-  if (!features.length) { showFormError('Noben izbran GERK nima uvožene cone vzorčenja za izvoz.'); return; }
+    rows.push({
+      ID: String(id++),
+      SCHLAGNAME: `${shape.gerk_code} ${customerName}`.trim(),
+      PROBEDATUM: '',
+      PROBENUMME: '',
+      FLAECHE_HA: nfPolygonAreaHa(rings),
+    });
+  }
+
+  if (!features.length) { showFormError('Noben izbran GERK nima niti uvožene cone niti uradne meje za izvoz.'); return; }
 
   const { shp, shx } = nfBuildShpShx(features);
   const dbf = nfBuildDbf(NF_DBF_FIELDS, rows);
@@ -3333,9 +3561,12 @@ function exportSelectedGerksToShapefile(btn) {
   ]);
 
   downloadTextFile(`${baseName}.zip`, zip, 'application/zip');
-  const exportedCodes = new Set(zones.map(z => z.gerk_code));
+  const exportedCodes = new Set([...zonedCodes, ...fallbackShapes.map(s => s.gerk_code)]);
   const skipped = codes.filter(c => !exportedCodes.has(c));
-  showFormSuccess(`✓ Izvoženih ${features.length} ${features.length === 1 ? 'cona' : 'con'} vzorčenja.` + (skipped.length ? ` Brez con: ${skipped.join(', ')}.` : ''));
+  const parts = [];
+  if (zones.length) parts.push(`${zones.length} ${zones.length === 1 ? 'cona' : 'con'} vzorčenja`);
+  if (fallbackShapes.length) parts.push(`${fallbackShapes.length} ${fallbackShapes.length === 1 ? 'uradna meja' : 'uradnih mej'}`);
+  showFormSuccess(`✓ Izvoženih ${features.length}: ${parts.join(' + ')}.` + (skipped.length ? ` Brez meje: ${skipped.join(', ')}.` : ''));
 }
 
 async function updateSampleNo(inputEl) {
@@ -3842,20 +4073,18 @@ async function confirmKmlImport(btn) {
         });
         if (importError) throw importError;
 
-        // Backfill Ha from the imported zones' own area (gerk_segment.area_ha
-        // is a generated column computed from the actual polygon geometry —
-        // no registry lookup needed) when this GERK has none yet. Covers
-        // custom/sub-divided codes with no registry match at all (e.g. a
-        // large field split into "1526437_CH1", "1526437_MO7"...), which
-        // otherwise show no Ha despite the zone geometry being right there.
+        // Ha priority: KML import (actual measured geometry) > manual entry
+        // > fields registry — a freshly imported zone's own area
+        // (gerk_segment.area_ha, a generated column computed from the real
+        // polygon) is the most trustworthy number there is, so it always
+        // overwrites whatever kolicina_ha was before (manual or registry),
+        // not just when it was empty.
         const { data: segRows } = await supabase.from('gerk_segment').select('label, area_ha').eq('segmentation_id', segmentationId);
         const areaByLabel = new Map((segRows || []).map(r => [r.label, Number(r.area_ha) || null]));
-        if (!gerk.kolicina_ha) {
-          const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
-          if (importedHa > 0) {
-            const { error: haError } = await supabase.from('delovni_nalogi_gerki').update({ kolicina_ha: importedHa }).eq('id', gerk.id);
-            if (!haError) gerk.kolicina_ha = importedHa;
-          }
+        const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
+        if (importedHa > 0) {
+          const { error: haError } = await supabase.from('delovni_nalogi_gerki').update({ kolicina_ha: importedHa }).eq('id', gerk.id);
+          if (!haError) gerk.kolicina_ha = importedHa;
         }
 
         // Each imported zone also becomes its own segment (delovni_nalogi_vzorci
@@ -4082,7 +4311,7 @@ woAddExistingGerkBtn.addEventListener('click', async () => {
       .insert(entries.map(({ code, hectares }) => ({
         delovni_nalog_id: currentDetailWorkOrder.id,
         gerk_code:        code,
-        kolicina_ha:      knownByCode.get(code)?.area_ha ?? (hectares ? parseFloat(hectares) : null),
+        kolicina_ha:      (hectares ? parseFloat(hectares) : null) ?? knownByCode.get(code)?.area_ha ?? null,
       })))
       .select('id, gerk_code, kolicina_ha, lokacija, tip_lab_analize');
     if (error) throw error;
@@ -4160,7 +4389,6 @@ fabMenu.querySelectorAll('.fab-menu-item').forEach(btn => {
 
 modalClose.addEventListener('click', closeModal);
 woBackBtn.addEventListener('click', closeModal);
-cancelBtn.addEventListener('click', closeModal);
 
 formModal.addEventListener('click', e => { if (e.target === formModal) closeModal(); });
 declModal.addEventListener('click', e => { if (e.target === declModal) closeDeclModal(); });
@@ -5068,13 +5296,31 @@ function closeAddCustomerModal() {
   document.body.style.overflow = '';
 }
 
+// Only SI/HR have a strict, known rule (Matej, 2026-11-08) — the Minimax
+// customer sync downstream needs a real davčna/OIB to match or create the
+// customer there. Other countries just need some non-empty digit string.
+function newCustomerVatFormatError(vat, country) {
+  const d = vat.replace(/\D/g, '');
+  if (!d) return 'Davčna številka je obvezna.';
+  if (country === 'Slovenija' && d.length !== 8) return 'Slovenska davčna številka ima 8 števk.';
+  if (country === 'Hrvaška' && d.length !== 11) return 'Hrvaški OIB ima 11 števk.';
+  return null;
+}
+
 addCustomerForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const naziv   = newCustomerNazivInput.value.trim();
   const kraj    = newCustomerKrajInput.value.trim();
   const country = newCustomerCountryInput.value;
+  const vat     = newCustomerVatInput.value.trim();
   if (!naziv) {
     addCustomerErrorEl.textContent = 'Naziv je obvezen.';
+    addCustomerErrorEl.hidden = false;
+    return;
+  }
+  const vatError = newCustomerVatFormatError(vat, country);
+  if (vatError) {
+    addCustomerErrorEl.textContent = vatError;
     addCustomerErrorEl.hidden = false;
     return;
   }
@@ -5084,14 +5330,40 @@ addCustomerForm.addEventListener('submit', async (e) => {
   addCustomerSaveBtn.querySelector('.btn-label').hidden = true;
   addCustomerSaveBtn.querySelector('.btn-spinner').hidden = false;
   try {
+    // Check whether a customer with this davčna/OIB already exists in
+    // Minimax (mm_customers — kept in sync independently of this app) —
+    // creating a second one there would be a real, hard-to-undo duplicate.
+    // digits-only compare against both of Minimax's own tax fields, same
+    // matching rule the "Pripravi račun" sync uses.
+    const vatDigits = vat.replace(/\D/g, '');
+    let minimaxCustomerId = null;
+    const { data: mmHits } = await supabase
+      .from('mm_customers')
+      .select('minimax_id, name, tax_number, vat_identification_number')
+      .or(`tax_number.eq.${vatDigits},vat_identification_number.ilike.%${vatDigits}`);
+    const mmMatch = (mmHits || []).find(m =>
+      (m.tax_number || '').replace(/\D/g, '') === vatDigits ||
+      (m.vat_identification_number || '').replace(/\D/g, '').endsWith(vatDigits));
+    if (mmMatch) {
+      if (!confirm(`Stranka s to davčno številko že obstaja v Minimaxu: "${mmMatch.name}".\n\nAli ustvarim novo stranko v ERP in jo povežem s to obstoječo (brez podvajanja v Minimaxu)?`)) {
+        addCustomerSaveBtn.disabled = false;
+        addCustomerSaveBtn.querySelector('.btn-label').hidden = false;
+        addCustomerSaveBtn.querySelector('.btn-spinner').hidden = true;
+        return;
+      }
+      minimaxCustomerId = Number(mmMatch.minimax_id);
+    }
+
     // country drives two downstream things: the SI/HR registry lookup
     // when resolving a GERK code's map location (see
     // migration_gerk_country_match.sql), and create_field_declaration_link's
     // automatic sl/hr form-language pick — both already keyed off this
     // same column, just never had a UI to set it on creation before.
+    // minimax_customer_id left null (unless already matched above) lets
+    // the DB trigger create this customer in Minimax automatically.
     const { data, error } = await supabase
       .from('customers')
-      .insert({ naziv, company_name: naziv, address_city: kraj || null, country })
+      .insert({ naziv, company_name: naziv, address_city: kraj || null, country, vat_number: vatDigits, minimax_customer_id: minimaxCustomerId })
       .select('id, naziv, company_name, contact_name, email')
       .single();
     if (error) throw error;
@@ -5202,6 +5474,7 @@ function switchTab(tab) {
   tabNalogi.classList.toggle('tab-btn--active', tab === 'nalogi');
   tabPlaniranje.classList.toggle('tab-btn--active', tab === 'planiranje');
   tabGnojilni.classList.toggle('tab-btn--active', tab === 'gnojilni');
+  tabSledenje.classList.toggle('tab-btn--active', tab === 'sledenje');
   // Poročila has no tab-bar button of its own (opened from the + menu) —
   // hide the whole bar rather than leave it showing with nothing active.
   tabBarEl.hidden         = tab === 'reports';
@@ -5209,6 +5482,7 @@ function switchTab(tab) {
   panelNalogi.hidden     = tab !== 'nalogi';
   panelPlaniranje.hidden = tab !== 'planiranje';
   panelGnojilni.hidden   = tab !== 'gnojilni';
+  panelSledenje.hidden   = tab !== 'sledenje';
   panelReports.hidden    = tab !== 'reports';
   updateFabVisibility();
   if (tab === 'nalogi' && !workOrdersLoaded) loadWorkOrders();
@@ -5235,6 +5509,7 @@ function updateFabVisibility() {
   addBtn.hidden = !isAdminView();
   tabPlaniranje.hidden = !isAdminView();
   tabGnojilni.hidden = !isAdminView();
+  tabSledenje.hidden = !isAdminView();
 }
 
 // Renders the header's Admin/Regular view switch (admin-only) and
@@ -5256,7 +5531,7 @@ adminViewToggle.addEventListener('change', () => {
   adminViewActive = adminViewToggle.checked;
   localStorage.setItem('adminViewActive', adminViewActive ? '1' : '0');
   if (!isAdminView()) { woShowDeletedActive = false; clearWoSelection(); } // never leave the archived list or a bulk selection showing once out of Admin view
-  if (!isAdminView() && (currentTab === 'planiranje' || currentTab === 'gnojilni')) switchTab('nalogi'); // its tab button is about to hide — don't strand them on it
+  if (!isAdminView() && ['planiranje', 'gnojilni', 'sledenje'].includes(currentTab)) switchTab('nalogi'); // its tab button is about to hide — don't strand them on it
   renderAdminViewToggle();
   updateFabVisibility();
   updateShowDeletedButton();
@@ -5269,6 +5544,7 @@ tabEvidenca.addEventListener('click',   () => switchTab('evidenca'));
 tabNalogi.addEventListener('click',     () => switchTab('nalogi'));
 tabPlaniranje.addEventListener('click', () => switchTab('planiranje'));
 tabGnojilni.addEventListener('click',   () => switchTab('gnojilni'));
+tabSledenje.addEventListener('click',   () => switchTab('sledenje'));
 
 // ── Work orders: load + render ───────────────────────────────────
 function slugStatus(status) {
@@ -5319,7 +5595,7 @@ async function loadWorkOrders() {
   const [{ data, error }, { data: centerPoints }, { data: durations }] = await Promise.all([
     supabase
       .from('delovni_nalogi')
-      .select('*, customers(naziv, company_name), profiles(full_name), delovni_nalogi_gerki(id, gerk_code, kolicina_ha, lokacija, tip_lab_analize, delovni_nalogi_vzorci(id, sample_no, sampling_date, sending_date, sampling_note, sending_note, sampling_depth_cm, area_ha, comment))')
+      .select('*, customers(naziv, company_name, minimax_customer_id, vat_number), profiles(full_name), delovni_nalogi_gerki(id, gerk_code, kolicina_ha, lokacija, tip_lab_analize, delovni_nalogi_vzorci(id, sample_no, sampling_date, sending_date, sampling_note, sending_note, sampling_depth_cm, area_ha, comment))')
       .order('ustvarjen', { ascending: false }),
     // One batched call for every row's map point, instead of one RPC
     // round trip per row — see get_work_orders_center_points.
@@ -5439,6 +5715,7 @@ function renderWorkOrders() {
       deleted:      !!wo.deleted_at,
       lat:          point?.lat ?? null,
       lng:          point?.lng ?? null,
+      raw:          wo, // full row — renderWoInvoiceCell() needs fields not flattened above
     };
   });
 
@@ -6237,17 +6514,11 @@ async function confirmNewKmlImport(btn) {
         });
         if (error) throw error;
 
-        // Same Ha fallback as the detail-view import — gerk_segment.area_ha
-        // is computed from the actual imported geometry, so a custom/
-        // sub-divided code with no registry match still gets a real Ha
-        // instead of showing nothing.
-        const known = fields.find(f => f.code === gerkCode);
-        let hectares = known?.area ?? null;
+        // Same Ha priority as the detail-view import — KML geometry first,
+        // fields registry only as a fallback when the import has no area.
         const { data: segRows } = await supabase.from('gerk_segment').select('label, area_ha').eq('segmentation_id', segmentationId);
-        if (!hectares) {
-          const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
-          if (importedHa > 0) hectares = importedHa;
-        }
+        const importedHa = (segRows || []).reduce((s, r) => s + (Number(r.area_ha) || 0), 0);
+        let hectares = importedHa > 0 ? importedHa : (fields.find(f => f.code === gerkCode)?.area ?? null);
         const areaByLabel = new Map((segRows || []).map(r => [r.label, Number(r.area_ha) || null]));
         const row = ensureGerkRowForPaste(gerkCode, hectares);
         if (row) addGerkSegments(row, imp.segments.map(s => ({ fms: null, sampleNo: s.label, vzorcenje: null, areaHa: areaByLabel.get(s.label) ?? null })));
@@ -6318,12 +6589,18 @@ function renderDeclCustomerList() {
     return;
   }
 
-  declCustomerList.innerHTML = matches.map(c =>
-    `<div class="decl-customer-row" data-id="${c.id}">${escHtml(c.name)}</div>`
+  declCustomerList.innerHTML = matches.map(c => `
+    <div class="decl-customer-row" data-id="${c.id}">
+      <span class="decl-customer-row-name">${escHtml(c.name)}</span>
+      <button type="button" class="btn btn-icon decl-customer-edit-btn" data-id="${c.id}" aria-label="Uredi stranko" title="Uredi stranko">✎</button>
+    </div>`
   ).join('');
 
   declCustomerList.querySelectorAll('.decl-customer-row').forEach(row => {
     row.addEventListener('click', () => openDeclDetail(row.dataset.id));
+  });
+  declCustomerList.querySelectorAll('.decl-customer-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); openEditCustomerModal(btn.dataset.id); });
   });
 }
 
@@ -6365,6 +6642,117 @@ function openDeclDetail(customerId) {
   loadDeclCustomerLinks();
   loadDeclCustomerTable();
 }
+
+// Edit-customer form — fetches the full row on demand (the list's own
+// `customers` array only carries the few fields the rest of the app
+// needs: id/name/contactName/email/deletedAt).
+async function openEditCustomerModal(customerId) {
+  editCustomerId = customerId;
+  editCustomerErrorEl.hidden = true;
+  editCustomerForm.reset();
+  editCustomerSaveBtn.disabled = true;
+  showModalAnimated(editCustomerModal);
+  document.body.style.overflow = 'hidden';
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('naziv, company_name, contact_name, email, phone, address_street, address_city, address_post_code, country, vat_number, region, sales_person, partner_id, notes, minimax_customer_id')
+    .eq('id', customerId)
+    .single();
+
+  editCustomerSaveBtn.disabled = false;
+  if (error || !data) {
+    editCustomerErrorEl.textContent = error?.message || 'Napaka pri nalaganju stranke.';
+    editCustomerErrorEl.hidden = false;
+    return;
+  }
+
+  editCustNaziv.value       = data.naziv || '';
+  editCustCompanyName.value = data.company_name || '';
+  editCustContact.value     = data.contact_name || '';
+  editCustEmail.value       = data.email || '';
+  editCustPhone.value       = data.phone || '';
+  editCustVat.value         = data.vat_number || '';
+  editCustStreet.value      = data.address_street || '';
+  editCustPostCode.value    = data.address_post_code || '';
+  editCustCity.value        = data.address_city || '';
+  editCustCountry.value     = data.country || 'Slovenija';
+  editCustRegion.value      = data.region || '';
+  editCustSalesPerson.value = data.sales_person || '';
+  editCustPartnerId.value   = data.partner_id || '';
+  editCustNotes.value       = data.notes || '';
+  editCustMinimaxId.value   = data.minimax_customer_id ?? '';
+}
+
+function closeEditCustomerModal() {
+  hideModalAnimated(editCustomerModal);
+  document.body.style.overflow = '';
+  editCustomerId = null;
+}
+
+editCustomerForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const companyName = editCustCompanyName.value.trim();
+  if (!companyName) {
+    editCustomerErrorEl.textContent = 'Uradni naziv je obvezen.';
+    editCustomerErrorEl.hidden = false;
+    return;
+  }
+
+  editCustomerErrorEl.hidden = true;
+  editCustomerSaveBtn.disabled = true;
+  editCustomerSaveBtn.querySelector('.btn-label').hidden = true;
+  editCustomerSaveBtn.querySelector('.btn-spinner').hidden = false;
+  try {
+    const { data, error } = await supabase
+      .from('customers')
+      .update({
+        naziv: editCustNaziv.value.trim() || null,
+        company_name: companyName,
+        contact_name: editCustContact.value.trim() || null,
+        email: editCustEmail.value.trim() || null,
+        phone: editCustPhone.value.trim() || null,
+        vat_number: editCustVat.value.trim() || null,
+        address_street: editCustStreet.value.trim() || null,
+        address_post_code: editCustPostCode.value.trim() || null,
+        address_city: editCustCity.value.trim() || null,
+        country: editCustCountry.value,
+        region: editCustRegion.value.trim() || null,
+        sales_person: editCustSalesPerson.value.trim() || null,
+        partner_id: editCustPartnerId.value.trim() || null,
+        notes: editCustNotes.value.trim() || null,
+        minimax_customer_id: editCustMinimaxId.value.trim() ? parseInt(editCustMinimaxId.value, 10) : null,
+      })
+      .eq('id', editCustomerId)
+      .select('id, naziv, company_name, contact_name, email')
+      .single();
+    if (error) throw error;
+
+    const local = customers.find(c => c.id === editCustomerId);
+    if (local) {
+      local.name = data.naziv || data.company_name || '—';
+      local.contactName = data.contact_name || null;
+      local.email = data.email || null;
+    }
+    customers.sort((a, b) => a.name.localeCompare(b.name));
+
+    const savedId = editCustomerId;
+    closeEditCustomerModal();
+    renderDeclCustomerList();
+    if (declCustomerId === savedId) openDeclDetail(savedId);
+  } catch (err) {
+    editCustomerErrorEl.textContent = err.message || 'Napaka pri shranjevanju stranke.';
+    editCustomerErrorEl.hidden = false;
+  } finally {
+    editCustomerSaveBtn.disabled = false;
+    editCustomerSaveBtn.querySelector('.btn-label').hidden = false;
+    editCustomerSaveBtn.querySelector('.btn-spinner').hidden = true;
+  }
+});
+
+editCustomerModalClose.addEventListener('click', closeEditCustomerModal);
+editCustomerCancelBtn.addEventListener('click', closeEditCustomerModal);
+editCustomerModal.addEventListener('click', e => { if (e.target === editCustomerModal) closeEditCustomerModal(); });
 
 // "Izbriši stranko" = archive (deleted_at), cascading to the
 // customer's fields and work orders too (soft_delete_customer RPC) —
