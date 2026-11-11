@@ -11,6 +11,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const els = {
   tab: document.getElementById('tabSledenje'),
+  subnavBtns: document.querySelectorAll('[data-sled-view]'),
+  viewOrders: document.getElementById('sledViewOrders'),
+  viewSegments: document.getElementById('sledViewSegments'),
+  toolbarOrders: document.getElementById('sledToolbarOrders'),
+  toolbarSegments: document.getElementById('sledToolbarSegments'),
   orderSearch: document.getElementById('sledOrderSearch'),
   orderRows: document.getElementById('sledOrderRows'),
   selectAllCb: document.getElementById('sledSelectAllCb'),
@@ -23,13 +28,27 @@ const els = {
   orderGerks: document.getElementById('sledOrderGerks'),
   orderBoxesWrap: document.getElementById('sledOrderBoxesWrap'),
   orderBoxRows: document.getElementById('sledOrderBoxRows'),
+  segSearch: document.getElementById('sledSegSearch'),
+  segRows: document.getElementById('sledSegRows'),
+  segSelectAllCb: document.getElementById('sledSegSelectAllCb'),
+  segSelectionBar: document.getElementById('sledSegSelectionBar'),
+  viewBoxes: document.getElementById('sledViewBoxes'),
+  toolbarBoxes: document.getElementById('sledToolbarBoxes'),
+  boxSearch: document.getElementById('sledBoxSearch'),
+  boxRows: document.getElementById('sledBoxRows'),
 };
+
+// Same controlled list as app.js's SAMPLE_ACTIONS (sampling_note) — small
+// local copy, same reasoning as the modal-animation/icon helpers above
+// (not worth importing across modules for one array).
+const SAMPLE_ACTIONS = ['ne pobereš', 'združi', 'združi_1', 'združi_2', 'združi_3', 'združi_4', 'združi_5', 'združi_6', 'združi_7', 'združi_8', 'združi_9', 'združi_10'];
 
 let orders = [];
 let boxes = [];
 let mmInvoiceById = {}; // minimax_racun_id -> mm_issued_invoices row (admin-only read) — real Osnutek/Poslano/Plačano status
 let currentOrderId = null;
 let selectedOrderIds = new Set();
+let selectedSegIds = new Set(); // Segmenti view — sample (delovni_nalogi_vzorci) ids
 // Default (Matej, 2026-11-06): Izvedeno + Delno prejeta analiza + Analiza
 // prejeta — the ones actually worth watching day to day; everything else
 // requires explicitly widening the filter. Seeded from the checkboxes'
@@ -102,11 +121,11 @@ async function loadAll() {
   const [{ data: orderData, error: orderError }, { data: boxData, error: boxError }, { data: mmInvoices }] = await Promise.all([
     supabase.from('delovni_nalogi')
       .select(`id, stevilka, status, ustvarjen, deleted_at, racun_zahtevan_at, racun_napaka,
-        minimax_racun_id, minimax_racun_stevilka, minimax_racun_status,
+        minimax_racun_id, minimax_racun_stevilka, minimax_racun_status, datum_vzorcenja,
+        zakljucen_brez_racuna_at, opomba_zakljucek,
         customers(naziv, company_name, minimax_customer_id, vat_number), profiles(full_name),
         delovni_nalogi_gerki(id, gerk_code, kolicina_ha, field_id, fields(name),
-          delovni_nalogi_vzorci(id, sample_no, box_id, sampling_note, sample_boxes(id, label, status, sent_at), lab_soil_result(${LAB_COLS}))),
-        work_logs(work_log_gerks(start_time))`)
+          delovni_nalogi_vzorci(id, sample_no, box_id, sampling_note, area_ha, sample_boxes(id, label, status, sent_at), lab_soil_result(${LAB_COLS})))`)
       .is('deleted_at', null)
       .order('ustvarjen', { ascending: false }),
     supabase.from('sample_boxes').select('*').order('created_at', { ascending: false }),
@@ -122,8 +141,13 @@ async function loadAll() {
   boxes = boxData ?? [];
   mmInvoiceById = Object.fromEntries((mmInvoices ?? []).map((inv) => [inv.minimax_id, inv]));
   for (const id of selectedOrderIds) if (!orders.some(o => o.id === id)) selectedOrderIds.delete(id);
+  const allSegIds = new Set(allSegmentRows().map(r => r.sample.id));
+  for (const id of selectedSegIds) if (!allSegIds.has(id)) selectedSegIds.delete(id);
   renderOrders();
+  renderSegmentRows();
+  renderBoxesList();
   updateSledSelectionBar();
+  updateSledSegSelectionBar();
 }
 
 // ── Sample-pipeline status ────────────────────────────────────────
@@ -142,11 +166,10 @@ function segmentHasResult(seg) { return !!seg.lab_soil_result?.length; }
 function segmentSkipped(seg) { return seg.sampling_note === 'ne pobereš'; }
 
 // "Datum vzorčenja" = when work on this order's first field actually
-// began (Matej, 2026-11-06) — the earliest work_log_gerks.start_time
-// across every work_logs row tied to this order, not a per-segment field.
+// began — stored on delovni_nalogi.datum_vzorcenja, kept in sync by a DB
+// trigger (see migration_datum_vzorcenja.sql) rather than recomputed here.
 function firstFieldStart(order) {
-  const times = (order.work_logs || []).flatMap(wl => (wl.work_log_gerks || []).map(g => g.start_time)).filter(Boolean);
-  return earliest(times);
+  return order.datum_vzorcenja || null;
 }
 
 const PIPELINE_BADGE = {
@@ -214,6 +237,9 @@ function orderStatusLabel(order) {
 // without any app-side action. The "Pripravi račun" trigger itself lives
 // in the main Delovni Nalogi list now, not here — this is read-only status.
 function invoiceStatusLabel(order) {
+  // "Zaključi brez računa" (Matej, 2026-11-11) — a terminal state, never
+  // touches minimax_racun_*/racun_zahtevan_at, so it's checked first.
+  if (order.zakljucen_brez_racuna_at) return 'Zaključeno brez računa';
   const inv = order.minimax_racun_id ? mmInvoiceById[order.minimax_racun_id] : null;
   if (inv) {
     if (inv.document_status === 'O') return 'Osnutek računa';
@@ -233,6 +259,7 @@ const INVOICE_BADGE = {
   'Račun poslan': 'fert-badge--sent',
   'Račun plačan': 'fert-badge--ok',
   'Račun storniran': 'fert-badge--neutral',
+  'Zaključeno brez računa': 'fert-badge--neutral',
 };
 
 // Icon-only trigger/retry/cancel (Matej, 2026-11-09: "samo ikono") — this
@@ -242,6 +269,10 @@ const INVOICE_BADGE = {
 // the window.* bridge it sets up — so it stays the single source of truth
 // for what "Pripravi račun" actually does, not duplicated here.
 function invoiceActionIcon(order) {
+  if (order.zakljucen_brez_racuna_at) {
+    const title = order.opomba_zakljucek ? `Zaključeno brez računa: ${order.opomba_zakljucek} — klikni za preklic` : 'Zaključeno brez računa — klikni za preklic';
+    return `<button type="button" class="wo-invoice-btn wo-invoice-btn--pending" data-action="sled-invoice-cancel-no-invoice" data-id="${esc(order.id)}" title="${esc(title)}" aria-label="Zaključeno brez računa, prekliči">↺</button>`;
+  }
   if (order.racun_napaka) {
     return `<button type="button" class="wo-invoice-btn wo-invoice-btn--error" data-action="sled-invoice-retry" data-id="${esc(order.id)}" title="${esc(order.racun_napaka)} — klikni za ponovni poskus" aria-label="Napaka pri računu, ponovno poskusi">⚠</button>`;
   }
@@ -355,6 +386,12 @@ els.orderRows.addEventListener('click', e => {
     if (o) window.cancelInvoiceRequest?.(o);
     return;
   }
+  const cancelNoInvoiceBtn = e.target.closest('[data-action="sled-invoice-cancel-no-invoice"]');
+  if (cancelNoInvoiceBtn) {
+    const o = orders.find(x => x.id === cancelNoInvoiceBtn.dataset.id);
+    if (o) window.cancelCloseWithoutInvoice?.(o);
+    return;
+  }
   const row = e.target.closest('tr[data-open-order]');
   if (row) openOrderModal(row.dataset.openOrder);
 });
@@ -365,6 +402,123 @@ els.orderRows.addEventListener('change', e => {
   else selectedOrderIds.delete(cb.dataset.id);
   updateSledSelectionBar();
   updateSelectAllState(filteredOrders().map(o => o.id));
+});
+
+// ── Naročila / Segmenti preklop ───────────────────────────────
+els.subnavBtns.forEach(btn => btn.addEventListener('click', () => {
+  els.subnavBtns.forEach(b => {
+    b.classList.toggle('fert-subnav-btn--active', b === btn);
+    b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+  });
+  const view = btn.dataset.sledView;
+  els.viewOrders.hidden = view !== 'orders';
+  els.viewSegments.hidden = view !== 'segments';
+  els.viewBoxes.hidden = view !== 'boxes';
+  els.toolbarOrders.hidden = view !== 'orders';
+  els.toolbarSegments.hidden = view !== 'segments';
+  els.toolbarBoxes.hidden = view !== 'boxes';
+}));
+
+// ── Segmenti view — obrnjena perspektiva: en delovni_nalogi_vzorci vrstica
+// na vrstico namesto enega naloga (Matej, 2026-11-11). Kompakten seznam,
+// stolpce bomo še dodajali. ──────────────────────────────────────
+function allSegmentRows() {
+  const rows = [];
+  for (const o of orders) {
+    for (const g of (o.delovni_nalogi_gerki || [])) {
+      for (const s of (g.delovni_nalogi_vzorci || [])) rows.push({ sample: s, gerk: g, order: o });
+    }
+  }
+  return rows;
+}
+function filteredSegmentRows() {
+  const q = els.segSearch.value.trim().toLowerCase();
+  const rows = allSegmentRows();
+  if (!q) return rows;
+  return rows.filter(({ sample: s, gerk: g, order: o }) => {
+    const hay = `${o.stevilka ?? ''} ${customerName(o.customers)} ${g.gerk_code ?? ''} ${g.fields?.name ?? ''} ${s.sample_no ?? ''}`.toLowerCase();
+    return hay.includes(q);
+  });
+}
+function renderSegmentRows() {
+  const rows = filteredSegmentRows();
+  if (!rows.length) {
+    els.segRows.innerHTML = `<tr><td colspan="8" class="fert-empty">${orders.length ? 'Ni zadetkov.' : 'Ni naročil.'}</td></tr>`;
+    updateSegSelectAllState([]);
+    return;
+  }
+  els.segRows.innerHTML = rows.map(({ sample: s, gerk: g, order: o }) => {
+    // Ha is the segment's own area_ha — deliberately NOT a fallback to the
+    // GERK's kolicina_ha (Matej, 2026-11-11): a GERK split into several
+    // segments has one ha per segment, not the whole GERK's.
+    const ha = s.area_ha != null ? Number(s.area_ha) : null;
+    const opts = ['<option value="">—</option>']
+      .concat(SAMPLE_ACTIONS.map(a => `<option value="${esc(a)}"${s.sampling_note === a ? ' selected' : ''}>${esc(a)}</option>`))
+      .join('');
+    // Box assignment frozen once shipped/resulted — same rule as the order
+    // modal's own segment rows (renderOrderGerks' `locked`).
+    const locked = segmentSent(s) || segmentHasResult(s);
+    return `<tr data-open-order="${esc(o.id)}">
+      <td><input type="checkbox" class="sled-seg-select-cb" data-id="${esc(s.id)}" aria-label="Izberi segment" ${selectedSegIds.has(s.id) ? 'checked' : ''}></td>
+      <td class="fert-strong">${esc(s.sample_no)}</td>
+      <td class="fert-num">${ha != null ? ha.toFixed(2) : '—'}</td>
+      <td>${esc(g.gerk_code)}</td>
+      <td>${esc(g.fields?.name ?? '—')}</td>
+      <td title="${esc(customerName(o.customers))}">${esc(customerName(o.customers))}</td>
+      <td><select class="sample-field-input sled-seg-vzorcenje" data-sample-id="${esc(s.id)}">${opts}</select></td>
+      <td><select class="sample-field-input sled-seg-box-select" data-box-select="${esc(s.id)}" ${locked ? 'disabled' : ''}>${boxSelectHtml(s)}</select></td>
+    </tr>`;
+  }).join('');
+  updateSegSelectAllState(rows.map(r => r.sample.id));
+}
+els.segSearch.addEventListener('input', renderSegmentRows);
+// Row click opens the segment's own order (same modal as the Naročila
+// view) — the checkbox and the Vzorčenje/Pošiljka <select>s must not also
+// trigger it.
+els.segRows.addEventListener('click', e => {
+  if (e.target.closest('.sled-seg-select-cb, .sled-seg-vzorcenje, .sled-seg-box-select')) return;
+  const row = e.target.closest('tr[data-open-order]');
+  if (row) openOrderModal(row.dataset.openOrder);
+});
+els.segRows.addEventListener('change', async e => {
+  const selectCb = e.target.closest('.sled-seg-select-cb');
+  if (selectCb) {
+    if (selectCb.checked) selectedSegIds.add(selectCb.dataset.id);
+    else selectedSegIds.delete(selectCb.dataset.id);
+    updateSledSegSelectionBar();
+    updateSegSelectAllState(filteredSegmentRows().map(r => r.sample.id));
+    return;
+  }
+  const vzorcenjeSel = e.target.closest('.sled-seg-vzorcenje');
+  if (vzorcenjeSel) {
+    const sampleId = vzorcenjeSel.dataset.sampleId;
+    const value = vzorcenjeSel.value || null;
+    const sample = allSegmentRows().find(r => r.sample.id === sampleId)?.sample;
+    vzorcenjeSel.disabled = true;
+    try {
+      const { error } = await supabase.from('delovni_nalogi_vzorci').update({ sampling_note: value }).eq('id', sampleId);
+      if (error) throw error;
+      if (sample) sample.sampling_note = value;
+    } catch (err) {
+      alert(err.message || 'Napaka pri shranjevanju.');
+      if (sample) vzorcenjeSel.value = sample.sampling_note || '';
+    } finally {
+      vzorcenjeSel.disabled = false;
+    }
+    return;
+  }
+  const boxSel = e.target.closest('[data-box-select]');
+  if (!boxSel) return;
+  const segId = boxSel.dataset.boxSelect;
+  if (boxSel.value === '__new__') {
+    const label = prompt('Oznaka nove škatle (pošiljke):');
+    if (!label || !label.trim()) { renderSegmentRows(); return; }
+    const box = await createBox(label.trim());
+    if (box) await assignSegmentToBox(segId, box.id);
+    else renderSegmentRows();
+    return;
+  }
+  await assignSegmentToBox(segId, boxSel.value || null);
 });
 
 // ── Selection + bulk export (mirrors app.js's work-order selection bar —
@@ -416,6 +570,120 @@ function clearSelection() {
   els.orderRows.querySelectorAll('.sled-select-cb').forEach(cb => { cb.checked = false; });
   updateSledSelectionBar();
   updateSelectAllState(filteredOrders().map(o => o.id));
+}
+
+// ── Segmenti: selection + bulk Vzorčenje/Pošiljka (Matej, 2026-11-11) ──
+function updateSegSelectAllState(visibleIds) {
+  const checkedCount = visibleIds.filter(id => selectedSegIds.has(id)).length;
+  els.segSelectAllCb.checked = visibleIds.length > 0 && checkedCount === visibleIds.length;
+  els.segSelectAllCb.indeterminate = checkedCount > 0 && checkedCount < visibleIds.length;
+}
+els.segSelectAllCb.addEventListener('click', () => {
+  const visible = filteredSegmentRows().map(r => r.sample.id);
+  const anySelected = visible.some(id => selectedSegIds.has(id));
+  if (anySelected) visible.forEach(id => selectedSegIds.delete(id));
+  else visible.forEach(id => selectedSegIds.add(id));
+  renderSegmentRows();
+  updateSledSegSelectionBar();
+});
+
+// Placeholder-first <select>s — the bar applies a bulk change on `change`
+// and immediately resets to the placeholder, rather than showing a value
+// that wouldn't make sense once segments differ from each other.
+function bulkVzorcenjeSelectHtml() {
+  return ['<option value="__placeholder__" selected disabled>Nastavi vzorčenje…</option>', '<option value="__clear__">—</option>']
+    .concat(SAMPLE_ACTIONS.map(a => `<option value="${esc(a)}">${esc(a)}</option>`))
+    .join('');
+}
+function bulkBoxSelectHtml() {
+  const openBoxes = boxes.filter(b => b.status === 'Odprta');
+  return ['<option value="__placeholder__" selected disabled>Dodeli pošiljko…</option>', '<option value="__clear__">— brez škatle —</option>']
+    .concat(openBoxes.map(b => `<option value="${esc(b.id)}">${esc(b.label)}</option>`))
+    .concat([`<option value="__new__">+ Nova škatla…</option>`])
+    .join('');
+}
+async function bulkSetVzorcenje(value) {
+  const ids = [...selectedSegIds];
+  if (!ids.length) return;
+  const { error } = await supabase.from('delovni_nalogi_vzorci').update({ sampling_note: value }).in('id', ids);
+  if (error) { alert('Napaka pri shranjevanju: ' + error.message); return; }
+  for (const id of ids) {
+    const sample = allSegmentRows().find(r => r.sample.id === id)?.sample;
+    if (sample) sample.sampling_note = value;
+  }
+  renderSegmentRows();
+}
+async function bulkAssignBox(boxId) {
+  // Same lock rule as a single row's own box <select> — already-sent or
+  // already-resulted segments are silently left out of the bulk change.
+  const all = allSegmentRows();
+  const ids = [...selectedSegIds].filter(id => {
+    const s = all.find(r => r.sample.id === id)?.sample;
+    return s && !(segmentSent(s) || segmentHasResult(s));
+  });
+  if (!ids.length) { alert('Noben izbran segment ni na voljo za spremembo pošiljke (že poslan ali ima rezultat analize).'); return; }
+  const { error } = await supabase.from('delovni_nalogi_vzorci').update({ box_id: boxId }).in('id', ids);
+  if (error) { alert('Napaka pri dodeljevanju pošiljke: ' + error.message); return; }
+  const boxObj = boxId ? (boxes.find(b => b.id === boxId) ?? null) : null;
+  for (const id of ids) {
+    const sample = all.find(r => r.sample.id === id)?.sample;
+    if (sample) { sample.box_id = boxId; sample.sample_boxes = boxObj; }
+  }
+  renderSegmentRows();
+  renderOrders();
+  renderBoxesList();
+  if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
+}
+
+function buildSledSegSelectionBar() {
+  els.segSelectionBar.setAttribute('role', 'toolbar');
+  els.segSelectionBar.setAttribute('aria-label', 'Skupinska dejanja za izbrane segmente');
+  els.segSelectionBar.innerHTML = `
+    <span class="wlg-sel-summary"></span>
+    <button type="button" class="wlg-sel-close" data-action="sled-seg-sel-close" aria-label="Prekliči izbiro" title="Prekliči izbiro">${SEL_ICON_CLOSE}</button>
+    <span class="wlg-sel-sep" aria-hidden="true"></span>
+    <div class="wlg-sel-actions">
+      <select id="segBulkVzorcenje" class="field-input sled-bulk-select" aria-label="Nastavi vzorčenje za izbrane segmente">${bulkVzorcenjeSelectHtml()}</select>
+      <select id="segBulkBox" class="field-input sled-bulk-select" aria-label="Dodeli pošiljko izbranim segmentom">${bulkBoxSelectHtml()}</select>
+    </div>`;
+  els.segSelectionBar.querySelector('[data-action="sled-seg-sel-close"]').addEventListener('click', clearSegSelection);
+  els.segSelectionBar.querySelector('#segBulkVzorcenje').addEventListener('change', async e => {
+    const v = e.target.value;
+    if (v === '__placeholder__') return;
+    await bulkSetVzorcenje(v === '__clear__' ? null : v);
+    e.target.value = '__placeholder__';
+  });
+  els.segSelectionBar.querySelector('#segBulkBox').addEventListener('change', async e => {
+    const v = e.target.value;
+    if (v === '__placeholder__') return;
+    let boxId = null;
+    if (v === '__new__') {
+      const label = prompt('Oznaka nove škatle (pošiljke):');
+      if (!label || !label.trim()) { e.target.value = '__placeholder__'; return; }
+      const box = await createBox(label.trim());
+      if (!box) { e.target.value = '__placeholder__'; return; }
+      boxId = box.id;
+    } else if (v !== '__clear__') {
+      boxId = v;
+    }
+    await bulkAssignBox(boxId);
+    e.target.value = '__placeholder__';
+  });
+}
+
+function updateSledSegSelectionBar() {
+  const n = selectedSegIds.size;
+  els.segSelectionBar.classList.toggle('wlg-selection-bar--visible', n > 0);
+  if (n === 0) return;
+  buildSledSegSelectionBar(); // rebuilt each time — box list may have changed
+  const summaryEl = els.segSelectionBar.querySelector('.wlg-sel-summary');
+  if (summaryEl) summaryEl.textContent = `${n} ${n === 1 ? 'izbran' : 'izbranih'}`;
+}
+function clearSegSelection() {
+  selectedSegIds = new Set();
+  els.segRows.querySelectorAll('.sled-seg-select-cb').forEach(cb => { cb.checked = false; });
+  updateSledSegSelectionBar();
+  updateSegSelectAllState(filteredSegmentRows().map(r => r.sample.id));
 }
 
 // Izvoz (CSV, odpre se v Excelu) — en vzorec = ena vrstica, samo za
@@ -606,6 +874,8 @@ async function assignSegmentToBox(segId, boxId) {
   const seg = findSegment(segId);
   if (seg) { seg.box_id = boxId; seg.sample_boxes = boxId ? (boxes.find(b => b.id === boxId) ?? null) : null; }
   if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
+  renderSegmentRows();
+  renderBoxesList();
 }
 
 async function createBox(label) {
@@ -626,7 +896,11 @@ function samplesInBox(boxId) {
     .map(s => ({ ...s, stevilka: o.stevilka, stranka: customerName(o.customers) })));
 }
 
-els.orderBoxRows.addEventListener('click', async e => {
+// Shared by both box tables — the per-order one inside #sledOrderModal and
+// the global "Škatle" subview (Matej, 2026-11-11: "morda rabimo še ločen
+// podzavihek — urejanje škatle") — same actions either way, since a box can
+// span several orders regardless of which table you clicked it from.
+async function handleBoxRowClick(e) {
   const sendBtn = e.target.closest('[data-send-box]');
   if (sendBtn) {
     const box = boxes.find(b => b.id === sendBtn.dataset.sendBox);
@@ -643,12 +917,48 @@ els.orderBoxRows.addEventListener('click', async e => {
       if (s.box_id === box.id) s.sample_boxes = box;
     }
     renderOrders();
+    renderSegmentRows();
+    renderBoxesList();
     if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
     return;
   }
   const printBtn = e.target.closest('[data-print-box]');
   if (printBtn) printBox(boxes.find(b => b.id === printBtn.dataset.printBox));
-});
+}
+els.orderBoxRows.addEventListener('click', handleBoxRowClick);
+
+// ── Škatle view — every box, any order, not scoped to one nalog (Matej,
+// 2026-11-11). Same row shape as renderOrderBoxes' table, just over all of
+// `boxes` instead of one order's box_ids. ───────────────────────────────
+function filteredBoxesList() {
+  const q = els.boxSearch.value.trim().toLowerCase();
+  if (!q) return boxes;
+  return boxes.filter(b => (b.label || '').toLowerCase().includes(q));
+}
+function renderBoxesList() {
+  const rows = filteredBoxesList();
+  if (!rows.length) {
+    els.boxRows.innerHTML = `<tr><td colspan="5" class="fert-empty">${boxes.length ? 'Ni zadetkov.' : 'Ni škatel.'}</td></tr>`;
+    return;
+  }
+  els.boxRows.innerHTML = rows.map(box => {
+    const n = samplesInBox(box.id).length;
+    const statusBadge = box.status === 'Poslano'
+      ? `<span class="fert-badge fert-badge--sent">Poslano</span>`
+      : `<span class="fert-badge fert-badge--warn">Odprta</span>`;
+    const actions = [`<button type="button" class="btn btn-secondary btn-sm" data-print-box="${esc(box.id)}">Natisni</button>`];
+    if (box.status === 'Odprta') actions.push(`<button type="button" class="btn btn-primary btn-sm" data-send-box="${esc(box.id)}">Zaključi in pošlji</button>`);
+    return `<tr>
+      <td class="fert-strong">${esc(box.label)}</td>
+      <td>${statusBadge}</td>
+      <td class="fert-num">${n}</td>
+      <td>${box.sent_at ? fmtDate(box.sent_at) : '—'}</td>
+      <td><div class="sled-row-actions">${actions.join('')}</div></td>
+    </tr>`;
+  }).join('');
+}
+els.boxSearch.addEventListener('input', renderBoxesList);
+els.boxRows.addEventListener('click', handleBoxRowClick);
 
 // One box = printBoxes([box]); bulk print (selection action bar) reuses
 // the same page markup, one per box, each on its own printed page — the

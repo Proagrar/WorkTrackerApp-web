@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v4.65';
+const APP_VERSION = 'v4.75';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -83,6 +83,8 @@ const woDatePanel   = document.getElementById('woDatePanel');
 const woIzvajalecEdit = document.getElementById('woIzvajalecEdit');
 const woPlanDateWrap = document.getElementById('woPlanDateWrap');
 const woPlanDateInput = document.getElementById('woPlanDate');
+const woSamplingDateWrap = document.getElementById('woSamplingDateWrap');
+const woSamplingDateValue = document.getElementById('woSamplingDateValue');
 const woStatusEdit = document.getElementById('woStatusEdit');
 const woStatusEditBtn = document.getElementById('woStatusEditBtn'); // phone-only admin disclosure for woStatusEdit
 const woStatusBadge = document.getElementById('woStatusBadge');
@@ -131,6 +133,9 @@ const ipGerkTotal = document.getElementById('ipGerkTotal');
 const ipMeta = document.getElementById('ipMeta');
 const invoicePreviewCancelBtn = document.getElementById('invoicePreviewCancelBtn');
 const invoicePreviewConfirmBtn = document.getElementById('invoicePreviewConfirmBtn');
+const ipNoInvoiceCb = document.getElementById('ipNoInvoiceCb');
+const ipNoInvoiceNoteWrap = document.getElementById('ipNoInvoiceNoteWrap');
+const ipNoInvoiceNote = document.getElementById('ipNoInvoiceNote');
 const roadTypeSel = document.getElementById('roadType');
 const roadHourSel = document.getElementById('roadHour');
 const roadMinSel  = document.getElementById('roadMin');
@@ -1576,6 +1581,16 @@ function updateOrderHeader() {
   woPlanDateWrap.hidden = !isAdmin || !currentDetailPlanId || currentDetailPlanIsHeaderDate;
   if (currentDetailPlanId && !currentDetailPlanIsHeaderDate) woPlanDateInput.value = currentDetailPlanDate;
 
+  // "Datum vzorčenja" — stored on delovni_nalogi.datum_vzorcenja, kept in
+  // sync by a DB trigger (see migration_datum_vzorcenja.sql) whenever a
+  // GERK's start_time changes; same rule the Sledenje naročilom column
+  // uses (earliest work_log_gerks.start_time across the order).
+  woSamplingDateWrap.hidden = !wo.datum_vzorcenja;
+  if (wo.datum_vzorcenja) {
+    const d = new Date(wo.datum_vzorcenja);
+    woSamplingDateValue.textContent = `${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
+  }
+
   // Status: admin gets an editable dropdown (only way to change it now
   // that there's no claim button); everyone else gets a read-only badge.
   // On phone, admin's dropdown is additionally collapsed behind a pencil
@@ -1676,6 +1691,13 @@ function openInvoicePreviewModal(wo) {
     totalMin > 0 ? `Skupaj ur: ${fmtHM(totalMin)}` : null,
   ].filter(Boolean).join(' · ');
 
+  // Reset the "Zaključi brez računa" sub-form every time — a stale checked
+  // state/note from a previous order must never carry over.
+  ipNoInvoiceCb.checked = false;
+  ipNoInvoiceNote.value = '';
+  ipNoInvoiceNoteWrap.hidden = true;
+  updateInvoicePreviewConfirmLabel();
+
   showModalAnimated(invoicePreviewModal);
 }
 
@@ -1688,9 +1710,44 @@ invoicePreviewClose.addEventListener('click', closeInvoicePreviewModal);
 invoicePreviewCancelBtn.addEventListener('click', closeInvoicePreviewModal);
 invoicePreviewModal.addEventListener('click', e => { if (e.target === invoicePreviewModal) closeInvoicePreviewModal(); });
 
+// Toggles the confirm button between "Potrdi in zahtevaj račun" (default)
+// and "Zaključi brez računa" (Matej, 2026-11-11) — same button, same
+// review screen, just a different write on confirm (see the click handler
+// below).
+function updateInvoicePreviewConfirmLabel() {
+  invoicePreviewConfirmBtn.querySelector('.btn-label').textContent =
+    ipNoInvoiceCb.checked ? 'Zaključi brez računa' : 'Potrdi in zahtevaj račun';
+}
+ipNoInvoiceCb.addEventListener('change', () => {
+  ipNoInvoiceNoteWrap.hidden = !ipNoInvoiceCb.checked;
+  updateInvoicePreviewConfirmLabel();
+});
+
 invoicePreviewConfirmBtn.addEventListener('click', async () => {
   const wo = invoicePreviewWorkOrder;
   if (!wo) return;
+  if (ipNoInvoiceCb.checked) {
+    const opomba = ipNoInvoiceNote.value.trim();
+    if (!opomba) { ipNoInvoiceNote.focus(); return; }
+    invoicePreviewConfirmBtn.disabled = true;
+    invoicePreviewConfirmBtn.querySelector('.btn-label').hidden = true;
+    invoicePreviewConfirmBtn.querySelector('.btn-spinner').hidden = false;
+    const { error } = await supabase
+      .from('delovni_nalogi')
+      .update({ zakljucen_brez_racuna_at: new Date().toISOString(), zakljucen_brez_racuna_by: currentUser.id, opomba_zakljucek: opomba })
+      .eq('id', wo.id)
+      .is('deleted_at', null)
+      .is('minimax_racun_id', null);
+    invoicePreviewConfirmBtn.disabled = false;
+    invoicePreviewConfirmBtn.querySelector('.btn-label').hidden = false;
+    invoicePreviewConfirmBtn.querySelector('.btn-spinner').hidden = true;
+    if (error) { closeInvoicePreviewModal(); return alert('Napaka pri zaključku brez računa.'); }
+    wo.zakljucen_brez_racuna_at = new Date().toISOString();
+    wo.opomba_zakljucek = opomba;
+    closeInvoicePreviewModal();
+    window.sledenjeRefreshOrders?.();
+    return;
+  }
   invoicePreviewConfirmBtn.disabled = true;
   invoicePreviewConfirmBtn.querySelector('.btn-label').hidden = true;
   invoicePreviewConfirmBtn.querySelector('.btn-spinner').hidden = false;
@@ -1710,6 +1767,21 @@ invoicePreviewConfirmBtn.addEventListener('click', async () => {
   closeInvoicePreviewModal();
   window.sledenjeRefreshOrders?.();
 });
+
+// Undo — clears the three fields so the order falls back into the normal
+// "Pripravi račun" eligible state (mirrors cancelInvoiceRequest below).
+async function cancelCloseWithoutInvoice(wo) {
+  if (!confirm(`Preklicati "zaključeno brez računa" za nalog ${wo.stevilka}?`)) return;
+  const { error } = await supabase
+    .from('delovni_nalogi')
+    .update({ zakljucen_brez_racuna_at: null, zakljucen_brez_racuna_by: null, opomba_zakljucek: null })
+    .eq('id', wo.id);
+  if (error) return alert('Napaka pri preklicu.');
+  wo.zakljucen_brez_racuna_at = null;
+  wo.zakljucen_brez_racuna_by = null;
+  wo.opomba_zakljucek = null;
+  window.sledenjeRefreshOrders?.();
+}
 
 // Direct (no modal) — already reviewed once via the preview modal; this
 // just resubmits the same request after Minimax sync reported an error.
@@ -1750,6 +1822,7 @@ async function cancelInvoiceRequest(wo) {
 window.openInvoicePreviewModal = openInvoicePreviewModal;
 window.retryInvoiceRequest = retryInvoiceRequest;
 window.cancelInvoiceRequest = cancelInvoiceRequest;
+window.cancelCloseWithoutInvoice = cancelCloseWithoutInvoice;
 
 // ── Modal ──────────────────────────────────────────────────────
 let currentDetailWorkOrder = null;
