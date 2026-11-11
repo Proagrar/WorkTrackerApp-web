@@ -32,6 +32,7 @@ const els = {
   planSearch: document.getElementById('fertPlanSearch'),
   planStatus: document.getElementById('fertPlanStatus'),
   planRows: document.getElementById('fertPlanRows'),
+  planSelectionBar: document.getElementById('fertPlanSelectionBar'),
   importOpenBtn: document.getElementById('fertImportOpenBtn'),
   importBackBtn: document.getElementById('fertImportBackBtn'),
   importFiles: document.getElementById('fertImportFiles'),
@@ -47,6 +48,12 @@ const els = {
   settingsBody: document.getElementById('fertSettingsBody'),
 };
 
+// Small local copies — same reasoning as shipping.js's own copies of these
+// (modal-close/download icons): not worth importing across modules for a
+// couple of inline SVGs.
+const SEL_ICON_CLOSE = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><line x1="4" y1="4" x2="16" y2="16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><line x1="16" y1="4" x2="4" y2="16" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`;
+const SEL_ICON_DOWNLOAD = `<svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 3v9m0 0-3.5-3.5M10 12l3.5-3.5M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 // Default name filter: the lab's own result files for the current season
 // ("Proagrar d.o.o._21.10.2026.xlsx"); the shared LAB RESULTS folder also
 // holds other labs' and older years' files.
@@ -60,6 +67,7 @@ let labPlans = new Map(); // delovni_nalog_gerk_id → newest live plan; null = 
 let settingsLoaded = false;
 let pendingImport = null; // { files: [...parsed] } between preview and confirm
 let labFlash = '';        // one-shot success message shown above the list after an import
+let selectedPlanIds = new Set(); // Načrti — plans picked for the Izvoz action
 
 function esc(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -336,6 +344,97 @@ els.labRows.addEventListener('click', async event => {
       gerk_code: g.gerk_code, field_id: g.field_id, field_name: g.fields?.name ?? null });
   }
 });
+
+// sl-SI comma-decimal text — matches the template's own mix (half its lab
+// columns are numeric cells, half are text with a comma, see the subagent
+// analysis this was built from).
+function commaText(value) {
+  return value == null || value === '' ? '' : String(value).replace('.', ',');
+}
+function exportDateText(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${parseInt(d, 10)}.${parseInt(m, 10)}.${y}`;
+}
+
+const FERT_EXPORT_SHEET1_HEADERS = ['Customer no.', 'Invoice no.', 'VAT ID', 'VAT payer', 'Sales person', 'Sales Person phone', 'Sales Person email',
+  'Name', 'Surname', 'Company', 'Farm ID', 'Street', 'Street no.', 'ZIP Code', 'City', 'Country', 'Phone', 'E-mail',
+  'General comment for particular invoice number', 'General comment for the field', 'Field ID', 'Field size (ha)', 'Field name',
+  'Segment no', 'Next Culture', 'Field designation', 'Analysis date'];
+const FERT_EXPORT_SHEET1_WIDTHS = { 0: 12.89, 1: 10.66, 2: 13.89, 3: 18.55, 4: 18.66, 6: 24.55, 9: 14.33, 18: 44.11, 19: 72.33, 20: 16.44, 21: 16.44, 23: 9.11, 26: 9.11 };
+const FERT_EXPORT_SHEET2_HEADERS = ['Sample no', 'pH', 'KA', 'Ca', 'CaCO3', 'Org matter', 'NO3-N + NO2-N', 'P2O5', 'K2O', 'Mg', 'Na', 'Zn', 'Cu', 'Mn',
+  'Salts', 'SO4-S', 'Fe', 'Recommendation Ca', 'Recommendation P', 'Recommendation K', 'Recommendation organic matter',
+  'Recommendation fertilizer 1', 'Recommendation fertilizer 2', 'Recommendation fertilizer 3', 'Recommendation fertilizer 4', 'Recommendation fertilizer 5',
+  'Quantity fertilizer 1', 'Quantity fertilizer 2', 'Quantity fertilizer 3', 'Quantity fertilizer 4', 'Quantity fertilizer 5'];
+const FERT_EXPORT_SHEET2_WIDTHS = { 0: 15.33, 5: 10.55, 6: 15.0, 7: 8.89, 8: 7.89, 17: 19.55, 18: 18.55, 20: 30.66, 21: 26.89, 23: 26.89, 25: 26.89, 26: 18.55 };
+
+function applyColWidths(ws, widths) {
+  const max = Math.max(...Object.keys(widths).map(Number));
+  const cols = [];
+  for (let i = 0; i <= max; i++) cols.push(widths[i] != null ? { wch: widths[i] } : {});
+  ws['!cols'] = cols;
+}
+
+async function exportSelectedFertPlans() {
+  if (!selectedPlanIds.size) return;
+  const exportBtn = els.planSelectionBar.querySelector('[data-action-id="fert-plan-sel-export"]');
+  if (exportBtn) exportBtn.disabled = true;
+  try {
+    const { data: plans, error } = await supabase
+      .from('fert_plan')
+      .select(`id, gerk_code, field_name, crop_name, report_text,
+        customers(naziv, company_name, contact_name, vat_number, sales_person, address_street, address_post_code, address_city, country, phone, email),
+        p_fertilizer:fert_fertilizer!fert_plan_p_fertilizer_id_fkey(name),
+        k_fertilizer:fert_fertilizer!fert_plan_k_fertilizer_id_fkey(name),
+        lime_fertilizer:fert_fertilizer!fert_plan_lime_fertilizer_id_fkey(name),
+        fert_plan_segment(id, sample_no, area_ha, ph_kcl, p2o5, k2o, need_p2o5_kg_ha, need_k2o_kg_ha, p_fert_real_kg, k_fert_real_kg, lime_real_kg, included,
+          lab_soil_result(ka, caco3_pct, humus_pct, no3_no2_n, mg, na, zn, cu, mn, salts_pct, so4_s, fe, analysis_date))`)
+      .in('id', [...selectedPlanIds])
+      .order('sort_order', { foreignTable: 'fert_plan_segment' });
+    if (error) throw error;
+
+    const sheet1 = [FERT_EXPORT_SHEET1_HEADERS];
+    const sheet2 = [FERT_EXPORT_SHEET2_HEADERS];
+    for (const p of plans ?? []) {
+      const customer = p.customers;
+      const custName = customerName(customer);
+      for (const s of (p.fert_plan_segment ?? []).filter(s => s.included)) {
+        sheet1.push([
+          '', '', customer?.vat_number ?? '', '', customer?.sales_person ?? '', '', '',
+          customer?.contact_name || custName, '', customer?.company_name ?? '', '',
+          customer?.address_street ?? '', '', customer?.address_post_code ?? '', customer?.address_city ?? '', customer?.country ?? '',
+          customer?.phone ?? '', customer?.email ?? '',
+          '', p.report_text ?? '', p.gerk_code ?? '', s.area_ha != null ? Number(s.area_ha) : '', p.field_name ?? '',
+          s.sample_no ?? '', p.crop_name ?? '', `${p.gerk_code ?? ''} ${custName}`.trim(), exportDateText(s.lab_soil_result?.analysis_date),
+        ]);
+        const lab = s.lab_soil_result;
+        sheet2.push([
+          s.sample_no ?? '', s.ph_kcl != null ? Number(s.ph_kcl) : '', commaText(lab?.ka), '', commaText(lab?.caco3_pct),
+          lab?.humus_pct != null ? Number(lab.humus_pct) : '', commaText(lab?.no3_no2_n),
+          s.p2o5 != null ? Number(s.p2o5) : '', s.k2o != null ? Number(s.k2o) : '',
+          commaText(lab?.mg), commaText(lab?.na), commaText(lab?.zn), commaText(lab?.cu), commaText(lab?.mn), commaText(lab?.salts_pct), commaText(lab?.so4_s), commaText(lab?.fe),
+          '', s.need_p2o5_kg_ha != null ? Number(s.need_p2o5_kg_ha) : '', s.need_k2o_kg_ha != null ? Number(s.need_k2o_kg_ha) : '', '',
+          p.p_fertilizer?.name ?? '', p.k_fertilizer?.name ?? '', p.lime_fertilizer?.name ?? '', '', '',
+          s.p_fert_real_kg != null ? Number(s.p_fert_real_kg) : '', s.k_fert_real_kg != null ? Number(s.k_fert_real_kg) : '', s.lime_real_kg != null ? Number(s.lime_real_kg) : '', '', '',
+        ]);
+      }
+    }
+
+    const XLSX = await loadSheetJs();
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet(sheet1);
+    applyColWidths(ws1, FERT_EXPORT_SHEET1_WIDTHS);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Sheet1');
+    const ws2 = XLSX.utils.aoa_to_sheet(sheet2);
+    applyColWidths(ws2, FERT_EXPORT_SHEET2_WIDTHS);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Sheet2');
+    XLSX.writeFile(wb, `izracun_gnojila_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    alert('Napaka pri izvozu: ' + (err.message || err));
+  } finally {
+    if (exportBtn) exportBtn.disabled = false;
+  }
+}
 
 async function openLinkPicker(resultId, cellEl) {
   const result = labResults.find(r => r.id === resultId);
@@ -1239,7 +1338,7 @@ const fieldTitle = f => `${f.gerk_code ?? '—'}${f.field_name && f.field_name !
 
 // ── plan list ────────────────────────────────────────────────
 async function loadPlans() {
-  els.planRows.innerHTML = '<tr><td colspan="8" class="fert-empty">Nalaganje …</td></tr>';
+  els.planRows.innerHTML = '<tr><td colspan="9" class="fert-empty">Nalaganje …</td></tr>';
   const { data, error } = await supabase
     .from('fert_plan')
     .select('id, plan_date, status, gerk_code, field_name, crop_name, created_at, batch_id, customers(naziv, company_name), fert_plan_segment(area_ha, included)')
@@ -1247,9 +1346,10 @@ async function loadPlans() {
     .order('plan_date', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) {
-    els.planRows.innerHTML = `<tr><td colspan="8" class="fert-empty fert-error">Napaka pri nalaganju: ${esc(error.message)}</td></tr>`;
+    els.planRows.innerHTML = `<tr><td colspan="9" class="fert-empty fert-error">Napaka pri nalaganju: ${esc(error.message)}</td></tr>`;
     return;
   }
+  for (const id of selectedPlanIds) if (!(data ?? []).some(p => p.id === id)) selectedPlanIds.delete(id);
   plans = data ?? [];
   renderPlans();
 }
@@ -1260,7 +1360,8 @@ function renderPlans() {
   const rows = plans.filter(p => (!status || p.status === status)
     && (!q || [customerName(p.customers), p.gerk_code, p.field_name, p.crop_name].join(' ').toLowerCase().includes(q)));
   if (!rows.length) {
-    els.planRows.innerHTML = `<tr><td colspan="8" class="fert-empty">${plans.length ? 'Ni zadetkov.' : 'Še ni načrtov — klikni + Nov načrt.'}</td></tr>`;
+    els.planRows.innerHTML = `<tr><td colspan="9" class="fert-empty">${plans.length ? 'Ni zadetkov.' : 'Še ni načrtov — klikni + Nov načrt.'}</td></tr>`;
+    updatePlanSelectAllState([]);
     return;
   }
   const groupSize = new Map();
@@ -1274,6 +1375,7 @@ function renderPlans() {
       ? '<span class="fert-badge fert-badge--ok">Potrjeno</span>'
       : '<span class="fert-badge fert-badge--warn">Osnutek</span>';
     return `<tr>
+      <td><input type="checkbox" class="fert-plan-select-cb" data-id="${esc(p.id)}" aria-label="Izberi načrt" ${selectedPlanIds.has(p.id) ? 'checked' : ''}></td>
       <td>${esc(fmtDate(p.plan_date))}</td>
       <td class="fert-strong">${esc(customerName(p.customers))}</td>
       <td>${esc(p.gerk_code ?? '—')}${p.field_name && p.field_name !== p.gerk_code ? ` · ${esc(p.field_name)}` : ''}${groupBadge}</td>
@@ -1288,11 +1390,13 @@ function renderPlans() {
       </td>
     </tr>`;
   }).join('');
+  updatePlanSelectAllState(rows.map(p => p.id));
 }
 
 els.planSearch.addEventListener('input', renderPlans);
 els.planStatus.addEventListener('change', renderPlans);
 els.planRows.addEventListener('click', async event => {
+  if (event.target.closest('.fert-plan-select-cb')) return;
   const open = event.target.closest('[data-plan-open]');
   const copy = event.target.closest('[data-plan-copy]');
   const del = event.target.closest('[data-plan-delete]');
@@ -1306,6 +1410,71 @@ els.planRows.addEventListener('click', async event => {
     loadPlans();
   }
 });
+els.planRows.addEventListener('change', event => {
+  const cb = event.target.closest('.fert-plan-select-cb');
+  if (!cb) return;
+  if (cb.checked) selectedPlanIds.add(cb.dataset.id);
+  else selectedPlanIds.delete(cb.dataset.id);
+  updatePlanSelectionBar();
+  updatePlanSelectAllState(planSelectableIds());
+});
+
+// ── Selection + Excel export (Matej, 2026-11-11: "izvoz se je nanašal na
+// narejene načrte, iz teh je treba zgraditi excel") — select one or more
+// already-made plans (any status — Osnutek or Potrjeno) and export them as
+// an Excel file matching the external "Template Drinovec/Rola" layout
+// exactly in structure/labels (Matej explicitly OK'd skipping the red
+// cell-highlight styling — the free SheetJS build can't write cell styles —
+// and OK'd leaving template columns with no real source blank).
+function planSelectableIds() {
+  return [...els.planRows.querySelectorAll('.fert-plan-select-cb')].map(cb => cb.dataset.id);
+}
+function updatePlanSelectAllState(visibleIds) {
+  const cb = document.getElementById('fertPlanSelectAllCb');
+  if (!cb) return;
+  const checkedCount = visibleIds.filter(id => selectedPlanIds.has(id)).length;
+  cb.checked = visibleIds.length > 0 && checkedCount === visibleIds.length;
+  cb.indeterminate = checkedCount > 0 && checkedCount < visibleIds.length;
+}
+document.getElementById('fertPlanSelectAllCb')?.addEventListener('change', e => {
+  const visible = planSelectableIds();
+  const anySelected = visible.some(id => selectedPlanIds.has(id));
+  if (anySelected) visible.forEach(id => selectedPlanIds.delete(id));
+  else visible.forEach(id => selectedPlanIds.add(id));
+  renderPlans();
+  updatePlanSelectionBar();
+});
+
+function buildPlanSelectionBar() {
+  els.planSelectionBar.setAttribute('role', 'toolbar');
+  els.planSelectionBar.setAttribute('aria-label', 'Skupinska dejanja za izbrane načrte');
+  els.planSelectionBar.innerHTML = `
+    <span class="wlg-sel-summary"></span>
+    <button type="button" class="wlg-sel-close" data-action="fert-plan-sel-close" aria-label="Prekliči izbiro" title="Prekliči izbiro">${SEL_ICON_CLOSE}</button>
+    <span class="wlg-sel-sep" aria-hidden="true"></span>
+    <div class="wlg-sel-actions">
+      <button type="button" class="wlg-sel-action" data-action-id="fert-plan-sel-export" aria-label="Izvozi izbrane načrte v Excel" title="Izvozi izbrane načrte v Excel">
+        ${SEL_ICON_DOWNLOAD}<span class="wlg-sel-action-label">Izvozi</span>
+      </button>
+    </div>`;
+  els.planSelectionBar.querySelector('[data-action="fert-plan-sel-close"]').addEventListener('click', clearPlanSelection);
+  els.planSelectionBar.querySelector('[data-action-id="fert-plan-sel-export"]').addEventListener('click', exportSelectedFertPlans);
+}
+buildPlanSelectionBar();
+
+function updatePlanSelectionBar() {
+  const n = selectedPlanIds.size;
+  els.planSelectionBar.classList.toggle('wlg-selection-bar--visible', n > 0);
+  if (n === 0) return;
+  const summaryEl = els.planSelectionBar.querySelector('.wlg-sel-summary');
+  if (summaryEl) summaryEl.textContent = `${n} ${n === 1 ? 'izbran' : 'izbranih'}`;
+}
+function clearPlanSelection() {
+  selectedPlanIds = new Set();
+  els.planRows.querySelectorAll('.fert-plan-select-cb').forEach(cb => { cb.checked = false; });
+  updatePlanSelectionBar();
+  updatePlanSelectAllState(planSelectableIds());
+}
 
 // `preset` = customer + GERK line chosen up front (from Analize tal)
 async function startNewPlan(preset) {

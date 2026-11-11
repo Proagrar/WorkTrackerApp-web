@@ -1005,6 +1005,14 @@ input, select, textarea { font-family: inherit; }
   box-shadow: 0 0 0 2px var(--blue-800);
 }
 
+/* Persistent version of the same highlight — set by clicking a GERK's
+   shape/zone on the map (focusGerkRowFromMap), not cleared by mouseout like
+   .wlg-row--map-hover is, so it survives after the cursor leaves the shape
+   (Matej, 2026-11-11). */
+.wlg-row--map-focus {
+  box-shadow: 0 0 0 2px var(--blue-800);
+}
+
 .wlg-times {
   display: flex;
   align-items: center;
