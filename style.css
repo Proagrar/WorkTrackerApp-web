@@ -962,6 +962,11 @@ input, select, textarea { font-family: inherit; }
 .wlg-code { font-family: monospace; font-weight: 700; font-size: .875rem; color: var(--text-primary); }
 
 .wlg-name { font-size: .8125rem; font-weight: 600; color: var(--text-primary); }
+.wlg-add-name-btn {
+  font-size: .75rem; font-weight: 600; color: var(--blue-600, #2563eb);
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+}
+.wlg-add-name-btn:hover { text-decoration: underline; }
 
 /* Used both as an <a> (GERK-level, opens Google Maps directly) and a
    <button> (sample-level, opens the embedded map modal) — the reset
@@ -1597,6 +1602,26 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   white-space: nowrap;
   cursor: default;
 }
+
+/* Segmenti has 10 data columns plus 2 dropdowns — on top of .sled-table's
+   own spacing, this needs its own tighter pass so the whole thing fits in
+   one row without reaching for .reports-table-wrap's horizontal scrollbar
+   (Matej, 2026-11-12: "preširoko, vse mora iti v eno vrstico"). Text
+   columns get a hard cap + ellipsis (full value still on hover via the
+   cell's title), and the two per-row <select>s (Vzorčenje/Pošiljka) get a
+   fixed narrow width instead of sizing to their widest option/label. */
+.sled-seg-table th, .sled-seg-table td { padding: 4px 6px; font-size: .78125rem; }
+.sled-seg-table .fert-sort-btn { padding: 6px 4px; }
+.sled-seg-table .sled-customer-cell { max-width: 110px; }
+.sled-seg-gerk-cell {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+.sled-seg-table .sled-seg-vzorcenje { width: 92px; max-width: 92px; }
+.sled-seg-table .sled-seg-box-select { width: 100px; max-width: 100px; flex: none; }
 
 /* Poročila's table has more columns than Evidenca dela's (12 incl.
    checkbox) — tighter cell padding buys back width before the reader
@@ -3188,6 +3213,8 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .decl-customer-row:hover,
 .decl-customer-row:active { background: var(--blue-50); }
 .decl-customer-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decl-customer-row--unlinked .decl-customer-row-name { color: var(--error); }
+.decl-customer-row-warn { flex-shrink: 0; color: var(--error); font-size: 1.0625rem; cursor: help; }
 .decl-customer-edit-btn { flex-shrink: 0; width: 32px; height: 32px; font-size: .9375rem; }
 
 .edit-customer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-5); align-items: start; }
@@ -3507,6 +3534,9 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .fert-lab-table td.fert-ellipsis { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .fert-lab-table .fert-row-actions { gap: 6px; align-items: center; }
 .fert-badge--mini { margin-left: 4px; padding: 1px 6px; font-size: .625rem; vertical-align: 1px; }
+.sled-invoice-num { margin-left: 6px; font-size: .6875rem; color: var(--text-secondary); white-space: nowrap; }
+.sled-invoice-link { color: inherit; text-decoration: underline; text-decoration-style: dotted; }
+.sled-invoice-link:hover { text-decoration-style: solid; }
 .fert-sort-btn { display: block; width: 100%; padding: 10px 14px; border: 0; background: transparent; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; text-align: inherit; white-space: nowrap; cursor: pointer; }
 .fert-sort-btn:hover, .fert-sort-btn:focus-visible, .fert-sort-btn--active { color: var(--blue-800); }
 

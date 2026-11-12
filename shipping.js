@@ -22,6 +22,9 @@ const els = {
   selectionBar: document.getElementById('sledSelectionBar'),
   statusFilterBtn: document.getElementById('sledStatusFilterBtn'),
   statusFilterMenu: document.getElementById('sledStatusFilterMenu'),
+  invoiceStatusFilterBtn: document.getElementById('sledInvoiceStatusFilterBtn'),
+  invoiceStatusFilterMenu: document.getElementById('sledInvoiceStatusFilterMenu'),
+  invoiceStatusSelectAllCb: document.getElementById('sledInvoiceStatusSelectAllCb'),
   orderModal: document.getElementById('sledOrderModal'),
   orderModalClose: document.getElementById('sledOrderModalClose'),
   orderModalTitle: document.getElementById('sledOrderModalTitle'),
@@ -29,13 +32,20 @@ const els = {
   orderBoxesWrap: document.getElementById('sledOrderBoxesWrap'),
   orderBoxRows: document.getElementById('sledOrderBoxRows'),
   segSearch: document.getElementById('sledSegSearch'),
+  segHead: document.getElementById('sledSegHead'),
   segRows: document.getElementById('sledSegRows'),
+  segStatusFilterBtn: document.getElementById('sledSegStatusFilterBtn'),
+  segStatusFilterMenu: document.getElementById('sledSegStatusFilterMenu'),
   segSelectAllCb: document.getElementById('sledSegSelectAllCb'),
   segSelectionBar: document.getElementById('sledSegSelectionBar'),
   viewBoxes: document.getElementById('sledViewBoxes'),
   toolbarBoxes: document.getElementById('sledToolbarBoxes'),
   boxSearch: document.getElementById('sledBoxSearch'),
   boxRows: document.getElementById('sledBoxRows'),
+  boxModal: document.getElementById('sledBoxModal'),
+  boxModalClose: document.getElementById('sledBoxModalClose'),
+  boxModalTitle: document.getElementById('sledBoxModalTitle'),
+  boxContentRows: document.getElementById('sledBoxContentRows'),
 };
 
 // Same controlled list as app.js's SAMPLE_ACTIONS (sampling_note) — small
@@ -45,7 +55,7 @@ const SAMPLE_ACTIONS = ['ne pobereš', 'Zavržen', 'združi', 'združi_1', 'zdru
 
 let orders = [];
 let boxes = [];
-let mmInvoiceById = {}; // minimax_racun_id -> mm_issued_invoices row (admin-only read) — real Osnutek/Poslano/Plačano status
+let mmInvoiceById = {}; // minimax_racun_id -> mm_issued_invoices row (admin-only read) — real Osnutek/Izdan/Plačan status
 let currentOrderId = null;
 let selectedOrderIds = new Set();
 let selectedSegIds = new Set(); // Segmenti view — sample (delovni_nalogi_vzorci) ids
@@ -55,6 +65,11 @@ let selectedSegIds = new Set(); // Segmenti view — sample (delovni_nalogi_vzor
 // own `checked` attribute in app.html, not hardcoded here, so the two
 // stay in sync by construction.
 let sledStatusFilterValues = new Set([...document.querySelectorAll('.sled-status-filter-cb:checked')].map(cb => cb.value));
+let sledInvoiceStatusFilterValues = new Set([...document.querySelectorAll('.sled-invoice-status-filter-cb:checked')].map(cb => cb.value));
+let sledSegStatusFilterValues = new Set([...document.querySelectorAll('.sled-seg-status-filter-cb:checked')].map(cb => cb.value));
+let segSortKey = 'segment';
+let segSortDir = 'asc';
+const textCollator = new Intl.Collator('sl', { numeric: true, sensitivity: 'base' });
 
 function esc(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -231,35 +246,71 @@ function orderStatusLabel(order) {
 
 // Invoice/payment status (Matej, 2026-11-09) — a second, independent line
 // shown next to the sample-pipeline status above: Račun ni izdan / Osnutek
-// računa / Račun poslan / Račun plačan. Poslano/Plačano come from the live
+// računa / Račun izdan / Račun plačan. Izdan/Plačan come from the live
 // Minimax mirror (mm_issued_invoices.payment_status), not just whatever
 // this app last wrote — a payment made directly in Minimax shows up here
 // without any app-side action. The "Pripravi račun" trigger itself lives
 // in the main Delovni Nalogi list now, not here — this is read-only status.
+// How long to still trust this app's own last-written status after a
+// request when the mirror hasn't caught up yet — the miniMax sync runs on
+// its own schedule (roughly every 2h, see "Minimax osvezitev"), so a
+// request younger than this is just sync lag, not necessarily wrong.
+const MINIMAX_MIRROR_GRACE_MS = 6 * 60 * 60 * 1000;
 function invoiceStatusLabel(order) {
   // "Zaključi brez računa" (Matej, 2026-11-11) — a terminal state, never
   // touches minimax_racun_*/racun_zahtevan_at, so it's checked first.
   if (order.zakljucen_brez_racuna_at) return 'Zaključeno brez računa';
-  const inv = order.minimax_racun_id ? mmInvoiceById[order.minimax_racun_id] : null;
-  if (inv) {
-    if (inv.document_status === 'O') return 'Osnutek računa';
-    if (inv.payment_status === 'Placan') return 'Račun plačan';
-    return 'Račun poslan';
+  if (order.minimax_racun_id) {
+    const inv = mmInvoiceById[order.minimax_racun_id];
+    if (inv) {
+      if (inv.document_status === 'O') return 'Osnutek računa';
+      if (inv.payment_status === 'Placan') return 'Račun plačan';
+      return 'Račun izdan';
+    }
+    // Mirror has no row for this id at all. Past the grace window that's
+    // not just sync lag — the mirror purges any invoice no longer in
+    // Minimax's own full list on every sync (Matej, 2026-11-11), so a
+    // missing row this old means the invoice was deleted directly in
+    // Minimax and this app's own racun_* fields are now stale (Matej,
+    // 2026-11-12: DN 139/Andrej Žura — ERP said "Račun izdan", Minimax had
+    // nothing). Trusting minimax_racun_status here would repeat that.
+    const requestedAt = order.racun_zahtevan_at ? new Date(order.racun_zahtevan_at).getTime() : 0;
+    const freshEnough = requestedAt && (Date.now() - requestedAt) < MINIMAX_MIRROR_GRACE_MS;
+    if (!freshEnough) return 'Preveri v Minimaxu';
   }
-  // Mirror doesn't have it yet (sync lag) — fall back to this app's own
-  // last-written status.
-  if (order.minimax_racun_status === 'izstavljen') return 'Račun poslan';
+  if (order.minimax_racun_status === 'izstavljen') return 'Račun izdan';
   if (order.minimax_racun_status === 'storniran') return 'Račun storniran';
   if (order.minimax_racun_status === 'osnutek') return 'Osnutek računa';
   return 'Račun ni izdan';
 }
+// Which actual Minimax invoice this order's draft/invoice became (Matej,
+// 2026-11-12: "kateri račun je bil narejen iz naloga") — same "YYYY-NNN"
+// label Minimax itself uses (and the same convention the external
+// Nalogi_povezovanje reconciliation report already uses). Needs the mirror
+// row (mmInvoiceById); a brand-new draft the mirror hasn't synced yet has
+// no number to show.
+function invoiceNumberLabel(order) {
+  const inv = order.minimax_racun_id ? mmInvoiceById[order.minimax_racun_id] : null;
+  return (inv?.year && inv?.invoice_number) ? `${inv.year}-${inv.invoice_number}` : null;
+}
+// Minimax's own invoice-view page — confirmed live 2026-11-12 against two
+// real invoices (Matej pasted both URLs): iracid is exactly minimax_id/
+// minimax_racun_id, pgat=pgatv is just a fixed view-mode flag. Works off
+// minimax_racun_id alone, so the link shows even before the mirror has
+// synced the row invoiceNumberLabel needs.
+function minimaxInvoiceUrl(order) {
+  return order.minimax_racun_id
+    ? `https://moj.minimax.si/SI/VA/WebUI/IzdanRacun/IzdanRacunView.aspx?iracid=${order.minimax_racun_id}&pgat=pgatv`
+    : null;
+}
 const INVOICE_BADGE = {
   'Račun ni izdan': 'fert-badge--neutral',
   'Osnutek računa': 'fert-badge--warn',
-  'Račun poslan': 'fert-badge--sent',
+  'Račun izdan': 'fert-badge--sent',
   'Račun plačan': 'fert-badge--ok',
   'Račun storniran': 'fert-badge--neutral',
   'Zaključeno brez računa': 'fert-badge--neutral',
+  'Preveri v Minimaxu': 'fert-badge--danger',
 };
 
 // Icon-only trigger/retry/cancel (Matej, 2026-11-09: "samo ikono") — this
@@ -308,6 +359,68 @@ els.statusFilterMenu.querySelectorAll('.sled-status-filter-cb').forEach(cb => {
 });
 updateStatusFilterBtnLabel();
 
+// Invoice-status filter, own instance, with a select-all row (same tri-state
+// pattern as reportsCustomerSelectAllCb in app.js) — Matej, 2026-11-13.
+function updateInvoiceStatusFilterBtnLabel() {
+  const n = sledInvoiceStatusFilterValues.size;
+  els.invoiceStatusFilterBtn.textContent = n === 0 ? 'Vsi računi' : n === 1 ? [...sledInvoiceStatusFilterValues][0] : `${n} računi`;
+}
+function syncInvoiceStatusSelectAllCb() {
+  const cbs = [...els.invoiceStatusFilterMenu.querySelectorAll('.sled-invoice-status-filter-cb')];
+  const checked = cbs.filter(cb => cb.checked).length;
+  els.invoiceStatusSelectAllCb.checked = checked > 0 && checked === cbs.length;
+  els.invoiceStatusSelectAllCb.indeterminate = checked > 0 && checked < cbs.length;
+}
+els.invoiceStatusFilterBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  els.invoiceStatusFilterMenu.hidden = !els.invoiceStatusFilterMenu.hidden;
+});
+els.invoiceStatusFilterMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => { els.invoiceStatusFilterMenu.hidden = true; });
+els.invoiceStatusFilterMenu.querySelectorAll('.sled-invoice-status-filter-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) sledInvoiceStatusFilterValues.add(cb.value);
+    else sledInvoiceStatusFilterValues.delete(cb.value);
+    syncInvoiceStatusSelectAllCb();
+    updateInvoiceStatusFilterBtnLabel();
+    renderOrders();
+  });
+});
+els.invoiceStatusSelectAllCb.addEventListener('change', () => {
+  const cbs = els.invoiceStatusFilterMenu.querySelectorAll('.sled-invoice-status-filter-cb');
+  cbs.forEach(cb => {
+    cb.checked = els.invoiceStatusSelectAllCb.checked;
+    if (cb.checked) sledInvoiceStatusFilterValues.add(cb.value);
+    else sledInvoiceStatusFilterValues.delete(cb.value);
+  });
+  els.invoiceStatusSelectAllCb.indeterminate = false;
+  updateInvoiceStatusFilterBtnLabel();
+  renderOrders();
+});
+updateInvoiceStatusFilterBtnLabel();
+
+// Same pattern, own instance, for the Segmenti view's status filter
+// (Matej, 2026-11-12).
+function updateSegStatusFilterBtnLabel() {
+  const n = sledSegStatusFilterValues.size;
+  els.segStatusFilterBtn.textContent = n === 0 ? 'Vsi statusi' : n === 1 ? [...sledSegStatusFilterValues][0] : `${n} statusi`;
+}
+els.segStatusFilterBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  els.segStatusFilterMenu.hidden = !els.segStatusFilterMenu.hidden;
+});
+els.segStatusFilterMenu.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => { els.segStatusFilterMenu.hidden = true; });
+els.segStatusFilterMenu.querySelectorAll('.sled-seg-status-filter-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) sledSegStatusFilterValues.add(cb.value);
+    else sledSegStatusFilterValues.delete(cb.value);
+    updateSegStatusFilterBtnLabel();
+    renderSegmentRows();
+  });
+});
+updateSegStatusFilterBtnLabel();
+
 // ── Naročila view ──────────────────────────────────────────────
 function filteredOrders() {
   const q = els.orderSearch.value.trim().toLowerCase();
@@ -321,6 +434,7 @@ function filteredOrders() {
       if (!hay.includes(q)) return false;
     }
     if (sledStatusFilterValues.size && !sledStatusFilterValues.has(orderStatusLabel(o))) return false;
+    if (sledInvoiceStatusFilterValues.size && !sledInvoiceStatusFilterValues.has(invoiceStatusLabel(o))) return false;
     return true;
   });
 }
@@ -343,6 +457,8 @@ function renderOrders() {
     const cls = PIPELINE_BADGE[label] ?? 'fert-badge--neutral';
     const invLabel = invoiceStatusLabel(o);
     const invCls = INVOICE_BADGE[invLabel] ?? 'fert-badge--neutral';
+    const invNum = invoiceNumberLabel(o);
+    const invUrl = minimaxInvoiceUrl(o);
     return `<tr data-open-order="${esc(o.id)}">
       <td><input type="checkbox" class="sled-select-cb" data-id="${esc(o.id)}" aria-label="Izberi nalog" ${selectedOrderIds.has(o.id) ? 'checked' : ''}></td>
       <td>${esc(o.stevilka)}</td>
@@ -356,7 +472,9 @@ function renderOrders() {
       <td><div class="sled-status-cell">
         ${statusStepperSvg(label)}<span class="fert-badge ${cls}">${esc(label)}</span>
       </div></td>
-      <td><span class="fert-badge ${invCls}">${esc(invLabel)}</span></td>
+      <td><span class="fert-badge ${invCls}"${invLabel === 'Zaključeno brez računa' && o.opomba_zakljucek ? ` title="${esc(o.opomba_zakljucek)}"` : ''}>${esc(invLabel)}</span>${invNum ? ` <span class="sled-invoice-num">${invUrl
+        ? `<a href="${esc(invUrl)}" target="_blank" rel="noopener" class="sled-invoice-link" title="Odpri račun v Minimaxu">${esc(invNum)} 🔗</a>`
+        : esc(invNum)}</span>` : ''}</td>
       <td class="sled-invoice-icon-col">${invoiceActionIcon(o)}</td>
     </tr>`;
   }).join('');
@@ -367,7 +485,7 @@ els.orderSearch.addEventListener('input', renderOrders);
 // Row click opens the order (checkbox + invoice-icon clicks are handled
 // separately and must not also trigger this).
 els.orderRows.addEventListener('click', e => {
-  if (e.target.closest('.sled-select-cb')) return;
+  if (e.target.closest('.sled-select-cb, .sled-invoice-link')) return;
   const requestBtn = e.target.closest('[data-action="sled-invoice-request"]');
   if (requestBtn) {
     const o = orders.find(x => x.id === requestBtn.dataset.id);
@@ -433,17 +551,77 @@ function allSegmentRows() {
 }
 function filteredSegmentRows() {
   const q = els.segSearch.value.trim().toLowerCase();
-  const rows = allSegmentRows();
-  if (!q) return rows;
-  return rows.filter(({ sample: s, gerk: g, order: o }) => {
+  return allSegmentRows().filter(({ sample: s, gerk: g, order: o }) => {
+    if (sledSegStatusFilterValues.size && !sledSegStatusFilterValues.has(orderStatusLabel(o))) return false;
+    if (!q) return true;
     const hay = `${o.stevilka ?? ''} ${customerName(o.customers)} ${g.gerk_code ?? ''} ${g.fields?.name ?? ''} ${s.sample_no ?? ''}`.toLowerCase();
     return hay.includes(q);
   });
 }
+
+// Sortable header, same fert-sort-btn look/behavior as Analize tal's own
+// (Matej, 2026-11-12). `value` feeds the sort; `num` picks numeric vs
+// natural-order text compare, same convention as fertilization.js.
+const SEG_COLUMNS = [
+  { key: 'segment',   label: 'Segment',    value: r => r.sample.sample_no },
+  { key: 'nalog',     label: 'Del. nalog', value: r => r.order.stevilka },
+  { key: 'ha',        label: 'Ha',         value: r => r.sample.area_ha, num: true },
+  { key: 'gerk',      label: 'GERK',       value: r => r.gerk.gerk_code },
+  { key: 'ime',       label: 'Ime gerka',  value: r => r.gerk.fields?.name },
+  { key: 'stranka',   label: 'Stranka',    value: r => customerName(r.order.customers) },
+  { key: 'vzorceno',  label: 'Vzorčeno',   value: r => firstFieldStart(r.order) },
+  { key: 'vzorcenje', label: 'Vzorčenje',  value: r => r.sample.sampling_note },
+  { key: 'posiljka',  label: 'Pošiljka',   value: r => r.sample.sample_boxes?.label },
+  { key: 'status',    label: 'Status',     value: r => orderStatusLabel(r.order) },
+];
+function renderSegHead() {
+  els.segHead.innerHTML = `<th><input type="checkbox" id="sledSegSelectAllCb" aria-label="Izberi vse segmente"></th>`
+    + SEG_COLUMNS.map(col => {
+      const active = segSortKey === col.key;
+      const arrow = active ? (segSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+      const ariaSort = active ? (segSortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+      return `<th class="${col.num ? 'fert-num' : ''}" aria-sort="${ariaSort}">`
+        + `<button type="button" class="fert-sort-btn${active ? ' fert-sort-btn--active' : ''}" data-sort="${col.key}">${col.label}${arrow}</button></th>`;
+    }).join('');
+  els.segSelectAllCb = document.getElementById('sledSegSelectAllCb'); // re-grab — innerHTML replaced the old node
+}
+els.segHead.addEventListener('click', e => {
+  const btn = e.target.closest('[data-sort]');
+  if (!btn) return;
+  const key = btn.dataset.sort;
+  segSortDir = (segSortKey === key && segSortDir === 'asc') ? 'desc' : 'asc';
+  segSortKey = key;
+  renderSegmentRows();
+});
+els.segHead.addEventListener('change', e => {
+  const cb = e.target.closest('#sledSegSelectAllCb');
+  if (!cb) return;
+  const visible = filteredSegmentRows().map(r => r.sample.id);
+  const anySelected = visible.some(id => selectedSegIds.has(id));
+  if (anySelected) visible.forEach(id => selectedSegIds.delete(id));
+  else visible.forEach(id => selectedSegIds.add(id));
+  renderSegmentRows();
+  updateSledSegSelectionBar();
+});
+function sortSegmentRows(rows) {
+  const col = SEG_COLUMNS.find(c => c.key === segSortKey);
+  if (!col) return rows;
+  const dir = segSortDir === 'asc' ? 1 : -1;
+  return rows
+    .map(r => ({ r, v: col.value(r) }))
+    .sort((a, b) => {
+      const aEmpty = a.v == null || a.v === '', bEmpty = b.v == null || b.v === '';
+      if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+      return dir * (col.num ? Number(a.v) - Number(b.v) : textCollator.compare(String(a.v), String(b.v)));
+    })
+    .map(x => x.r);
+}
+
 function renderSegmentRows() {
-  const rows = filteredSegmentRows();
+  renderSegHead();
+  const rows = sortSegmentRows(filteredSegmentRows());
   if (!rows.length) {
-    els.segRows.innerHTML = `<tr><td colspan="8" class="fert-empty">${orders.length ? 'Ni zadetkov.' : 'Ni naročil.'}</td></tr>`;
+    els.segRows.innerHTML = `<tr><td colspan="11" class="fert-empty">${orders.length ? 'Ni zadetkov.' : 'Ni naročil.'}</td></tr>`;
     updateSegSelectAllState([]);
     return;
   }
@@ -458,15 +636,21 @@ function renderSegmentRows() {
     // Box assignment frozen once shipped/resulted — same rule as the order
     // modal's own segment rows (renderOrderGerks' `locked`).
     const locked = segmentSent(s) || segmentHasResult(s);
+    const samplingDate = firstFieldStart(o);
+    const label = orderStatusLabel(o);
+    const cls = PIPELINE_BADGE[label] ?? 'fert-badge--neutral';
     return `<tr data-open-order="${esc(o.id)}">
       <td><input type="checkbox" class="sled-seg-select-cb" data-id="${esc(s.id)}" aria-label="Izberi segment" ${selectedSegIds.has(s.id) ? 'checked' : ''}></td>
       <td class="fert-strong">${esc(s.sample_no)}</td>
+      <td>${esc(o.stevilka)}</td>
       <td class="fert-num">${ha != null ? ha.toFixed(2) : '—'}</td>
-      <td>${esc(g.gerk_code)}</td>
-      <td>${esc(g.fields?.name ?? '—')}</td>
-      <td title="${esc(customerName(o.customers))}">${esc(customerName(o.customers))}</td>
+      <td class="sled-seg-gerk-cell" title="${esc(g.gerk_code)}">${esc(g.gerk_code)}</td>
+      <td class="sled-customer-cell" title="${esc(g.fields?.name ?? '—')}">${esc(g.fields?.name ?? '—')}</td>
+      <td class="sled-customer-cell" title="${esc(customerName(o.customers))}">${esc(customerName(o.customers))}</td>
+      <td>${samplingDate ? esc(fmtDate(samplingDate)) : '—'}</td>
       <td><select class="sample-field-input sled-seg-vzorcenje" data-sample-id="${esc(s.id)}">${opts}</select></td>
       <td><select class="sample-field-input sled-seg-box-select" data-box-select="${esc(s.id)}" ${locked ? 'disabled' : ''}>${boxSelectHtml(s)}</select></td>
+      <td><div class="sled-status-cell">${statusStepperSvg(label)}<span class="fert-badge ${cls}">${esc(label)}</span></div></td>
     </tr>`;
   }).join('');
   updateSegSelectAllState(rows.map(r => r.sample.id));
@@ -578,14 +762,9 @@ function updateSegSelectAllState(visibleIds) {
   els.segSelectAllCb.checked = visibleIds.length > 0 && checkedCount === visibleIds.length;
   els.segSelectAllCb.indeterminate = checkedCount > 0 && checkedCount < visibleIds.length;
 }
-els.segSelectAllCb.addEventListener('click', () => {
-  const visible = filteredSegmentRows().map(r => r.sample.id);
-  const anySelected = visible.some(id => selectedSegIds.has(id));
-  if (anySelected) visible.forEach(id => selectedSegIds.delete(id));
-  else visible.forEach(id => selectedSegIds.add(id));
-  renderSegmentRows();
-  updateSledSegSelectionBar();
-});
+// (select-all click handling lives on els.segHead's delegated 'change'
+// listener near renderSegHead() — the checkbox node itself is recreated on
+// every render, so a listener bound directly to it wouldn't survive.)
 
 // Placeholder-first <select>s — the bar applies a bulk change on `change`
 // and immediately resets to the placeholder, rather than showing a value
@@ -893,7 +1072,7 @@ async function createBox(label) {
 function samplesInBox(boxId) {
   return orders.flatMap(o => allSegments(o)
     .filter(s => s.box_id === boxId)
-    .map(s => ({ ...s, stevilka: o.stevilka, stranka: customerName(o.customers) })));
+    .map(s => ({ ...s, stevilka: o.stevilka, stranka: customerName(o.customers), vzorceno: firstFieldStart(o) })));
 }
 
 // Shared by both box tables — the per-order one inside #sledOrderModal and
@@ -924,6 +1103,23 @@ async function handleBoxRowClick(e) {
   }
   const printBtn = e.target.closest('[data-print-box]');
   if (printBtn) printBox(boxes.find(b => b.id === printBtn.dataset.printBox));
+  const deleteBtn = e.target.closest('[data-delete-box]');
+  if (deleteBtn) {
+    const box = boxes.find(b => b.id === deleteBtn.dataset.deleteBox);
+    if (!box) return;
+    const n = samplesInBox(box.id).length;
+    if (!confirm(`Izbrisati pošiljko "${box.label}"?${n ? ` ${n} vzorcev v njej bo ostalo brez pošiljke (ne izbrišejo se).` : ''}`)) return;
+    const { error } = await supabase.from('sample_boxes').delete().eq('id', box.id);
+    if (error) { alert('Napaka pri brisanju: ' + error.message); return; }
+    boxes = boxes.filter(b => b.id !== box.id);
+    for (const o of orders) for (const g of (o.delovni_nalogi_gerki || [])) for (const s of (g.delovni_nalogi_vzorci || [])) {
+      if (s.box_id === box.id) { s.box_id = null; s.sample_boxes = null; }
+    }
+    renderOrders();
+    renderSegmentRows();
+    renderBoxesList();
+    if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
+  }
 }
 els.orderBoxRows.addEventListener('click', handleBoxRowClick);
 
@@ -948,7 +1144,8 @@ function renderBoxesList() {
       : `<span class="fert-badge fert-badge--warn">Odprta</span>`;
     const actions = [`<button type="button" class="btn btn-secondary btn-sm" data-print-box="${esc(box.id)}">Natisni</button>`];
     if (box.status === 'Odprta') actions.push(`<button type="button" class="btn btn-primary btn-sm" data-send-box="${esc(box.id)}">Zaključi in pošlji</button>`);
-    return `<tr>
+    actions.push(`<button type="button" class="btn btn-secondary btn-sm fert-danger-text" data-delete-box="${esc(box.id)}">Briši</button>`);
+    return `<tr data-open-box="${esc(box.id)}">
       <td class="fert-strong">${esc(box.label)}</td>
       <td>${statusBadge}</td>
       <td class="fert-num">${n}</td>
@@ -958,7 +1155,31 @@ function renderBoxesList() {
   }).join('');
 }
 els.boxSearch.addEventListener('input', renderBoxesList);
-els.boxRows.addEventListener('click', handleBoxRowClick);
+els.boxRows.addEventListener('click', e => {
+  if (e.target.closest('button')) return handleBoxRowClick(e);
+  const row = e.target.closest('tr[data-open-box]');
+  if (row) openBoxModal(row.dataset.openBox);
+});
+
+function closeBoxModal() { hideModal(els.boxModal); }
+function openBoxModal(boxId) {
+  const box = boxes.find(b => b.id === boxId);
+  if (!box) return;
+  els.boxModalTitle.textContent = `Pošiljka ${box.label ?? ''}`;
+  const items = samplesInBox(boxId).sort((a, b) =>
+    (a.stevilka || '').localeCompare(b.stevilka || '', 'sl', { numeric: true }) || (a.gerk_code || '').localeCompare(b.gerk_code || '', 'sl'));
+  els.boxContentRows.innerHTML = items.length
+    ? items.map(it => `<tr>
+        <td class="fert-strong">${esc(it.sample_no)}</td>
+        <td>${esc(it.stevilka)}</td>
+        <td>${esc(it.stranka)}</td>
+        <td>${it.vzorceno ? esc(fmtDate(it.vzorceno)) : '—'}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="4" class="fert-empty">Pošiljka je prazna.</td></tr>`;
+  showModal(els.boxModal);
+}
+els.boxModalClose.addEventListener('click', closeBoxModal);
+els.boxModal.addEventListener('click', e => { if (e.target === els.boxModal) closeBoxModal(); });
 
 // One box = printBoxes([box]); bulk print (selection action bar) reuses
 // the same page markup, one per box, each on its own printed page — the
