@@ -719,6 +719,22 @@
                rendered height changed slightly. -->
           <div class="wo-map-top-left-controls">
             <button type="button" id="woMapLayersBtn" class="wo-map-layers-btn wo-map-layers-btn--detail" aria-pressed="false" title="Prikaži/skrij ceste in imena krajev">🛣 Ceste/imena</button>
+            <!-- Set by highlightGerkOnWoMap() when a GERK row is clicked —
+                 just a name label, so it's clear which GERK is highlighted
+                 while panning/zooming, not an interactive control. Moved
+                 here (Matej, 2026-11-14) — stacks below "Ceste/imena" via
+                 this column's own gap, instead of a hand-tuned top-center
+                 offset that kept needing +10px nudges. -->
+            <div id="woMapGerkLabel" class="wo-map-gerk-label" hidden></div>
+            <!-- Moved here from next to the GERKI search field (Matej,
+                 2026-11-14: "namesto zraven seznama") — hides a completed
+                 GERK's shape/zone/name label on the map (and, unchanged,
+                 its row below) — see updateMapCompletedVisibility()/
+                 applyGerkSearch() in app.js. -->
+            <label class="wo-map-hide-completed-toggle">
+              <input type="checkbox" id="wlgHideCompletedCb">
+              Skrij izvedene
+            </label>
           </div>
           <!-- Own absolute position (not stacked in the controls column
                above) so it can sit in the map's bottom-right corner on
@@ -728,21 +744,23 @@
                the rest of the screen (phone) — see renderCompactGerkList()
                and updateMapExpandState() in app.js. -->
           <button type="button" id="woMapExpandBtn" class="wo-map-expand-btn">⛶ Razširi</button>
-          <!-- Set by highlightGerkOnWoMap() when a GERK row is clicked —
-               just a name label, so it's clear which GERK is highlighted
-               while panning/zooming, not an interactive control. -->
-          <div id="woMapGerkLabel" class="wo-map-gerk-label" hidden></div>
           <!-- Fades out on its own after a successful "Poberi vzorec" —
                see showCaptureToast() in app.js. -->
           <div id="woCaptureToast" class="wo-capture-toast" aria-live="polite"></div>
           <div id="woCapturePanel" class="wo-capture-panel">
-            <button type="button" id="woCaptureBtn" class="btn btn-primary btn-sm wo-capture-btn">📍 Poberi vzorec</button>
-            <label class="wo-capture-toggle">
-              <input type="checkbox" id="woCaptureShowPoints" checked>
-              Prikaži točke
-            </label>
+            <!-- Plain button + checkbox, no points-list window (Matej,
+                 2026-11-14: "seznama točk ne rabimo" — reverts the brief
+                 collapsible-window version from v4.97). Deleting a point is
+                 now done via its marker's popup on the map instead of a
+                 list row — see drawCapturedPointsOnMap() in app.js. -->
+            <div class="wo-capture-row">
+              <button type="button" id="woCaptureBtn" class="btn btn-primary btn-sm wo-capture-btn">📍 Poberi vzorec</button>
+              <label class="wo-capture-toggle">
+                <input type="checkbox" id="woCaptureShowPoints">
+                Točke
+              </label>
+            </div>
             <div id="woCaptureError" class="alert alert-error wo-capture-error" hidden role="alert"></div>
-            <div id="woCaptureList" class="wo-capture-list"></div>
           </div>
         </div>
         <div id="workLogForm" class="work-form wo-detail-content">

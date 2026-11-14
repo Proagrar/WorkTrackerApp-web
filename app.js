@@ -2,7 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 
 // Bump alongside sw.js's CACHE constant on every push to GitHub.
-const APP_VERSION = 'v4.95';
+const APP_VERSION = 'v4.122';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 document.getElementById('appVersion').textContent = APP_VERSION;
@@ -118,7 +118,6 @@ const woCaptureBtn  = document.getElementById('woCaptureBtn');
 const woCaptureError = document.getElementById('woCaptureError');
 const woCaptureToast = document.getElementById('woCaptureToast');
 const woCaptureShowPoints = document.getElementById('woCaptureShowPoints');
-const woCaptureList = document.getElementById('woCaptureList');
 const woHeaderMeta = document.getElementById('woHeaderMeta');
 const invoicePreviewModal = document.getElementById('invoicePreviewModal');
 const invoicePreviewClose = document.getElementById('invoicePreviewClose');
@@ -151,6 +150,7 @@ const wlgSelectAllWrap = document.getElementById('wlgSelectAllWrap');
 const wlgSelectAllCheckbox = document.getElementById('wlgSelectAllCheckbox');
 const wlgSearchInput = document.getElementById('wlgSearchInput');
 const wlgSearchNoResults = document.getElementById('wlgSearchNoResults');
+const wlgHideCompletedCb = document.getElementById('wlgHideCompletedCb');
 const woGerkPagerEl       = document.getElementById('woGerkPager'); // phone-only — see updateGerkPaging()
 const woGerkPagerLabelEl  = document.getElementById('woGerkPagerLabel');
 const woGerkPagerPrevBtn  = document.getElementById('woGerkPagerPrev');
@@ -1125,6 +1125,27 @@ function normalizeZdruzi(raw) {
   return m ? `združi_${m[1]}` : raw;
 }
 
+// One distinct, clearly-separable color per "združi" group (Matej,
+// 2026-11-13: "lahko ista barva podlaga za združene", "barve morajo biti
+// jasno ločljive") — used both on the sample list row and on the matching
+// map zone, so a group reads the same way in both places.
+const ZDRUZI_GROUP_COLORS = {
+  'združi':    '#9CA3AF',
+  'združi_1':  '#F59E0B',
+  'združi_2':  '#3B82F6',
+  'združi_3':  '#10B981',
+  'združi_4':  '#EC4899',
+  'združi_5':  '#6366F1',
+  'združi_6':  '#F97316',
+  'združi_7':  '#14B8A6',
+  'združi_8':  '#8B5CF6',
+  'združi_9':  '#EAB308',
+  'združi_10': '#84CC16',
+};
+function sampleGroupColor(s) {
+  return ZDRUZI_GROUP_COLORS[normalizeZdruzi(s.sampling_note)] || null;
+}
+
 woBulkDepthSel.innerHTML = '<option value="">Globina…</option>' +
   SAMPLE_DEPTHS.map(d => `<option value="${d}">${d} cm</option>`).join('');
 
@@ -1282,15 +1303,22 @@ function applyGerkSearch() {
   rows.forEach(r => {
     const code = (r.dataset.code || '').toLowerCase();
     const name = (r.querySelector('.wlg-name')?.textContent || '').toLowerCase();
-    const matches = !term || code.includes(term) || name.includes(term);
+    const matchesSearch = !term || code.includes(term) || name.includes(term);
+    const hiddenAsCompleted = wlgHideCompleted && r.classList.contains('wlg-row--completed');
+    const matches = matchesSearch && !hiddenAsCompleted;
     r.classList.toggle('wlg-row--search-hidden', !matches);
     if (matches) visibleCount++;
   });
-  wlgSearchNoResults.hidden = !(term && visibleCount === 0);
+  wlgSearchNoResults.hidden = !((term || wlgHideCompleted) && visibleCount === 0);
   woGerkPageIndex = 0;
   updateGerkPaging();
+  updateMapCompletedVisibility();
 }
 wlgSearchInput.addEventListener('input', applyGerkSearch);
+wlgHideCompletedCb.addEventListener('change', () => {
+  wlgHideCompleted = wlgHideCompletedCb.checked;
+  applyGerkSearch();
+});
 woGerkPagerPrevBtn.addEventListener('click', () => {
   if (woGerkPageIndex > 0) { woGerkPageIndex--; updateGerkPaging(); }
 });
@@ -1370,7 +1398,7 @@ function renderWorkLogGerkRows(rows) {
             return `<span class="wlg-others-item">${o.completed ? '✓' : '•'} ${escHtml(opName)} · ${when}${time ? ' · ' + time : ''}</span>`;
           }).join('')}
         </div>` : ''}
-        ${renderSamplesSection(samples, r.gerkId)}
+        ${renderSamplesSection(samples, r.gerkId, r.code)}
       </div>`;
   }).join('');
 
@@ -1480,6 +1508,10 @@ function updateMapExpandState() {
   }
 
   woDetailLayoutEl?.classList.toggle('wo-detail-layout--map-expanded', woMapExpanded);
+  // Phone only: expanding the map also hides the modal's own header (title/
+  // close), so the map gets the full screen rather than just the space
+  // below it (Matej, 2026-11-13: "skrij tudi header").
+  formModal.classList.toggle('wo-modal--map-expanded', woMapExpanded && isMobile());
   workLogGerkRowsEl.hidden = woMapExpanded;
   wlgCompactList.hidden = !woMapExpanded;
   woMapExpandBtn.textContent = woMapExpanded ? '⤡ Pomanjšaj' : '⛶ Razširi';
@@ -1488,7 +1520,18 @@ function updateMapExpandState() {
   // The map's own container just changed size — Leaflet only re-measures
   // when told to, and needs the new size already applied in the DOM
   // (hence rAF, not immediate) or it reads the stale one mid-transition.
-  requestAnimationFrame(() => woMap?.invalidateSize());
+  requestAnimationFrame(() => {
+    woMap?.invalidateSize();
+    // Shrinking back down (Pomanjšaj) narrows the map's own pixel bounds —
+    // whatever was centered/zoomed while expanded doesn't automatically
+    // stay framed afterward. Re-fit to whatever's currently focused so it
+    // (Matej, 2026-11-14: "mora zemljevid obsegat še to označeno polje").
+    if (!woMapExpanded && woMap) {
+      const segLayer = woMapHighlightedSegmentId ? woMapSegmentPolygonLayers.get(woMapHighlightedSegmentId) : null;
+      if (segLayer) woMap.fitBounds(segLayer.getBounds(), { padding: [60, 60], maxZoom: 19 });
+      else if (woMapHighlightedCode) highlightGerkOnWoMap(woMapHighlightedCode);
+    }
+  });
 }
 
 woMapExpandBtn.addEventListener('click', () => {
@@ -1506,7 +1549,7 @@ woMapLayersBtn.addEventListener('click', () => {
 // Admins can always see + add segments (even zero today — that's the
 // point of the + button), everyone else only sees the panel when
 // there's actually something to show.
-function renderSamplesSection(samples, gerkId) {
+function renderSamplesSection(samples, gerkId, gerkCode) {
   if (!samples.length && !isAdminView()) return '';
   // Vzorčenje/Globina can also be set here, at creation — but stay
   // editable afterward too, admin-only (see renderSamplingCell/
@@ -1538,16 +1581,24 @@ function renderSamplesSection(samples, gerkId) {
         </button>
         <div class="wlg-samples-panel" hidden>
           <table class="wlg-samples-table">
-            <thead><tr><th>Št. segmenta</th><th>Vzorčenje</th><th>Globina</th><th>Opomba</th>${isAdminView() ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th></th><th>Št. segmenta</th><th>Vzorčenje</th><th>Globina</th><th>Opomba</th>${isAdminView() ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${samples.map(s => `
-                <tr class="${isNoCollectSample(s) ? 'wlg-sample-row--flagged' : ''}">
+              ${samples.map(s => {
+                const flagged = isNoCollectSample(s);
+                const groupColor = !flagged ? sampleGroupColor(s) : null;
+                const rowStyle = flagged
+                  ? 'style="background:#000;color:#F87171;"'
+                  : groupColor ? `style="background:${groupColor}22;box-shadow:inset 3px 0 0 ${groupColor};"` : '';
+                return `
+                <tr class="${flagged ? 'wlg-sample-row--flagged' : ''}" ${rowStyle}>
+                  <td><button type="button" class="btn btn-icon wlg-zoom-segment-btn" data-action="wlg-zoom-segment" data-sample-id="${escHtml(s.id)}" data-gerk-code="${escHtml(gerkCode || '')}" aria-label="Pokaži segment na zemljevidu" title="Pokaži segment na zemljevidu">📍</button></td>
                   <td>${renderSampleNoCell(s)}</td>
                   <td>${renderSamplingCell(s)}</td>
                   <td>${renderSampleDepthCell(s)}</td>
                   <td>${renderSampleCommentCell(s)}</td>
                   ${isAdminView() ? `<td><button type="button" class="wlg-remove-sample" data-action="wlg-remove-sample" data-sample-id="${escHtml(s.id)}" aria-label="Izbriši segment">✕</button></td>` : ''}
-                </tr>`).join('')}
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
           ${addSection}
@@ -1856,7 +1907,9 @@ let currentGerkSegments    = []; // get_work_order_gerk_segments rows — one pe
 let currentGerkShapes      = []; // get_work_order_gerk_shapes rows — official ARKOD registry boundary per GERK code, fallback for the ZIP export when there's no KML-imported zone
 let woMapSegmentLabelLayers = new Map(); // segment_id -> its permanent map label tooltip layer, so renaming a segment (updateSampleNo) can patch it live
 let woMapSegmentPointLayers = new Map(); // segment_id -> [{ layer, pointNo }] captured-point markers, same reason
+let woMapSegmentPolygonLayers = new Map(); // segment_id -> its own polygon layer, for zoom-to-segment (wlg-zoom-segment)
 let selectedGerkCodes      = new Set(); // admin-only multi-select on the GERK list, powers the contextual selection bar
+let wlgHideCompleted       = false; // "Skrij izvedene" — hides completed GERK rows + their map shapes/zones
 let currentDetailPlanId    = null; // delovni_nalogi_planiranje.id backing the "Planirano" field, if any — see loadPlanDateForDetail()
 let currentDetailPlanDate  = null;
 // True when opened from a specific Planiranje calendar entry (a planId was
@@ -1874,9 +1927,17 @@ async function openWorkOrderDetail(workOrder, planId = null) {
   currentDetailPlanIsHeaderDate = !!planId;
   woDatePanel.hidden = true; // phone-only tap-to-edit — always starts collapsed
   woStatusPanelOpen = false;
+  wlgHideCompletedCb.checked = false;
+  wlgHideCompleted = false;
   layoutWoDetailSections(); // phone only — see its own comment
 
-  modalTitle.textContent = workOrder.stevilka || 'Delovni nalog';
+  // Matej, 2026-11-14: with .wo-header-fields hidden on phone (v4.102) and
+  // .wo-header-summary removed (v4.110), the bare order number was the
+  // only thing left up top — no customer name visible at all anymore.
+  const titleCustomerName = workOrder.customers?.naziv || workOrder.customers?.company_name || '';
+  modalTitle.textContent = workOrder.stevilka
+    ? (titleCustomerName ? `${workOrder.stevilka} - ${titleCustomerName}` : workOrder.stevilka)
+    : 'Delovni nalog';
   hideFormFeedback();
   updateTractorDatalist();
 
@@ -1967,12 +2028,39 @@ let woMapLayersByCode = new Map(); // gerk_code -> { marker, shape, latlng } —
 let woMapHighlightedCode = null;
 let woMapHighlightRing   = null;   // circleMarker used as a highlight ring when a code has no shape
 let woMapFocusedListCode = null;   // gerk_code last focused via a map click (persists until another click, unlike the hover highlight)
+let woMapHighlightedSegmentId = null; // segment_id last zoomed-to via zoomToSampleSegment — its own highlight, separate from the GERK-level one above
 
 const WO_MAP_SHAPE_STYLE = { color: '#2455AA', weight: 2, fillColor: '#2455AA', fillOpacity: .15 };
 const WO_MAP_SEGMENT_STYLE = { color: '#D97706', weight: 2, dashArray: '4,3', fillColor: '#D97706', fillOpacity: .08 };
+// Black/red for "ne pobereš" (Matej, 2026-11-13), a group color for
+// "združi_N" segments — same colors the sample list row uses (sampleGroupColor/
+// isNoCollectSample) — otherwise the plain default. Matched to the imported
+// zone the same way updateSampleNo() already does: gerk_code + segment_label
+// === sample_no (gerk_segment carries no FK to delovni_nalogi_vzorci).
+function segmentBaseStyle(row) {
+  const gerk = (currentDetailWorkOrder?.delovni_nalogi_gerki || []).find(g => g.gerk_code === row.gerk_code);
+  const sample = gerk?.delovni_nalogi_vzorci?.find(s => s.sample_no === row.segment_label);
+  if (!sample) return WO_MAP_SEGMENT_STYLE;
+  if (isNoCollectSample(sample)) return { color: '#DC2626', weight: 2, dashArray: null, fillColor: '#000000', fillOpacity: .55 };
+  const groupColor = sampleGroupColor(sample);
+  if (groupColor) return { color: groupColor, weight: 2, dashArray: null, fillColor: groupColor, fillOpacity: .45 };
+  return WO_MAP_SEGMENT_STYLE;
+}
 const WO_MAP_CAPTURED_COLOR = '#16A34A';
-const WO_MAP_SHAPE_HIGHLIGHT_STYLE = { color: '#F59E0B', weight: 4, fillColor: '#F59E0B', fillOpacity: .35 };
-const WO_MAP_SEGMENT_HIGHLIGHT_STYLE = { color: '#F59E0B', weight: 3, dashArray: null, fillColor: '#F59E0B', fillOpacity: .3 };
+// Highlighting a GERK used to flat-overwrite every one of its zones to
+// this one amber style, wiping out each zone's own "združi" group color
+// or "ne pobereš" black/red (Matej, 2026-11-14: "barve morajo biti
+// ohranjene"). This keeps the zone's own color/fillColor and just
+// emphasizes it — thicker border, lower fill opacity so the underlying
+// imagery still shows through more ("opacity zmanjša, bolj poudarjeno").
+function emphasizeStyle(style) {
+  return { ...style, weight: (style.weight || 2) + 2, fillOpacity: Math.max((style.fillOpacity ?? .15) * 0.5, .05) };
+}
+// Segment-number pills show only from this zoom up (Matej, 2026-11-14);
+// below it, each field shows its name instead (wo-map-gerk-name-label) —
+// zoomed out, many overlapping number pills turn unreadable, and zone
+// outlines/colors stay visible at every zoom regardless.
+const WO_MAP_LABEL_MIN_ZOOM = 16;
 
 // Map → list: hovering a GERK's marker/shape highlights its row.
 function highlightGerkRow(code, on) {
@@ -1994,9 +2082,62 @@ function focusGerkRowFromMap(code) {
   const row = workLogGerkRowsEl.querySelector(`.wlg-row[data-code="${CSS.escape(code)}"]`);
   if (row) {
     row.classList.add('wlg-row--map-focus');
+    // On phone (not expanded) the list pages one row at a time via
+    // `hidden` (updateGerkPaging) — adding the focus class alone did
+    // nothing visible if this GERK wasn't the currently-shown page (Matej,
+    // 2026-11-14: "klik na gerk na zemljevidu še vedno ne prikaže gerka
+    // na seznamu"). Jump the pager to its page first.
+    if (isMobile() && !woMapExpanded) {
+      const rows = Array.from(workLogGerkRowsEl.querySelectorAll('.wlg-row:not(.wlg-row--search-hidden)'));
+      const idx = rows.indexOf(row);
+      if (idx !== -1) { woGerkPageIndex = idx; updateGerkPaging(); }
+    }
     row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   woMapFocusedListCode = code;
+}
+
+// Map → both: clicking a GERK's shape/zone (or, since 2026-11-14, its
+// name label when zoomed out past WO_MAP_LABEL_MIN_ZOOM) zooms in on it
+// AND focuses its row in the list — previously only the list side
+// happened on a map click, zooming in was map→list-click-driven via
+// highlightGerkOnWoMap only (reached from the list, not the map).
+function focusAndZoomGerk(code) {
+  focusGerkRowFromMap(code);
+  highlightGerkOnWoMap(code);
+}
+
+// List → map, segment-level (Matej, 2026-11-13: "klik na segment ti da
+// focus na sam segment") — zooms to just that one imported zone instead of
+// the whole GERK, since a GERK can be split into several. Matched the same
+// way updateSampleNo() already does (gerk_code + segment_label === sample_no,
+// no real FK between gerk_segment and delovni_nalogi_vzorci). Silently does
+// nothing if this segment has no imported zone to zoom to.
+function zoomToSampleSegment(sampleId, gerkCode) {
+  if (!woMap) return;
+  const gerk = (currentDetailWorkOrder?.delovni_nalogi_gerki || []).find(g => g.gerk_code === gerkCode);
+  const sample = gerk?.delovni_nalogi_vzorci?.find(s => s.id === sampleId);
+  if (!sample) return;
+  const seg = currentGerkSegments.find(s => s.gerk_code === gerkCode && s.segment_label === sample.sample_no);
+  const layer = seg?.segment_id ? woMapSegmentPolygonLayers.get(seg.segment_id) : null;
+  if (!layer) return;
+
+  // Visually highlight it too, not just center/zoom — otherwise, among
+  // several same-colored zones, it's not obvious which one was picked
+  // (Matej, 2026-11-14: "mora fokusirat segment ... tudi približati").
+  // Persists until another segment or GERK is focused, same pattern as
+  // highlightGerkOnWoMap's own single-highlight state.
+  if (woMapHighlightedSegmentId && woMapHighlightedSegmentId !== seg.segment_id) {
+    const prevLayer = woMapSegmentPolygonLayers.get(woMapHighlightedSegmentId);
+    prevLayer?.setStyle(prevLayer._wtBaseStyle || WO_MAP_SEGMENT_STYLE);
+  }
+  layer.setStyle(emphasizeStyle(layer._wtBaseStyle || WO_MAP_SEGMENT_STYLE));
+  layer.bringToFront();
+  woMapHighlightedSegmentId = seg.segment_id;
+
+  woMap.fitBounds(layer.getBounds(), { padding: [60, 60], maxZoom: 19 });
+  woMapGerkLabel.textContent = `${gerkCode} · ${sample.sample_no}`;
+  woMapGerkLabel.hidden = false;
 }
 
 // List → map: clicking a GERK row highlights its marker/shape (only
@@ -2007,7 +2148,7 @@ function highlightGerkOnWoMap(code) {
   if (woMapHighlightedCode && woMapHighlightedCode !== code) {
     const prev = woMapLayersByCode.get(woMapHighlightedCode);
     if (prev?.shapes) prev.shapes.forEach(l => l.setStyle(WO_MAP_SHAPE_STYLE));
-    if (prev?.zoneLayers) prev.zoneLayers.forEach(l => l.setStyle(WO_MAP_SEGMENT_STYLE));
+    if (prev?.zoneLayers) prev.zoneLayers.forEach(l => l.setStyle(l._wtBaseStyle || WO_MAP_SEGMENT_STYLE));
   }
   if (woMapHighlightRing) { woMapHighlightRing.remove(); woMapHighlightRing = null; }
 
@@ -2031,7 +2172,7 @@ function highlightGerkOnWoMap(code) {
     // of them together, not just the first.
     let combined = entry.shapes[0].getBounds();
     for (const l of entry.shapes) {
-      l.setStyle(WO_MAP_SHAPE_HIGHLIGHT_STYLE);
+      l.setStyle(emphasizeStyle(WO_MAP_SHAPE_STYLE));
       l.bringToFront();
       combined = combined.extend(l.getBounds());
     }
@@ -2042,7 +2183,7 @@ function highlightGerkOnWoMap(code) {
     // combined extent instead.
     let combined = entry.zoneLayers[0].getBounds();
     for (const l of entry.zoneLayers) {
-      l.setStyle(WO_MAP_SEGMENT_HIGHLIGHT_STYLE);
+      l.setStyle(emphasizeStyle(l._wtBaseStyle || WO_MAP_SEGMENT_STYLE));
       l.bringToFront();
       combined = combined.extend(l.getBounds());
     }
@@ -2057,7 +2198,11 @@ function highlightGerkOnWoMap(code) {
 
 function ensureWoMap() {
   if (woMap) return woMap;
-  woMap = L.map(woDetailMap);
+  // zoomControl: false — Matej, 2026-11-14: "odstrani '+ -' za zoom na
+  // zemljevidu". Pinch-to-zoom/scroll-to-zoom still work; this only drops
+  // the on-screen +/- buttons, which also clears the top-left corner
+  // they used to share with "Ceste/imena".
+  woMap = L.map(woDetailMap, { zoomControl: false });
   // Esri World Imagery (free, no API key) — satellite detail matters
   // more here than street-map labels for seeing actual field/crop
   // conditions, and unlike Google's tiles this is fine to embed
@@ -2082,6 +2227,9 @@ function ensureWoMap() {
   // A one-time invalidateSize() at open caught the initial size; this
   // catches every size change after that, not just the first.
   new ResizeObserver(() => woMap?.invalidateSize()).observe(woDetailMap.parentElement);
+  woMap.on('zoomend', () => {
+    woDetailMap.classList.toggle('wo-map-labels-hidden', woMap.getZoom() < WO_MAP_LABEL_MIN_ZOOM);
+  });
   return woMap;
 }
 
@@ -2095,9 +2243,9 @@ async function showWoDetailMap(workOrder) {
   currentGerkShapes = [];
   woMapSegmentLabelLayers = new Map();
   woMapSegmentPointLayers = new Map();
-  woCaptureList.innerHTML = '';
+  woMapSegmentPolygonLayers = new Map();
   woCaptureError.hidden = true;
-  woCaptureShowPoints.checked = true;
+  woCaptureShowPoints.checked = false;
   pendingKmlImports = [];
   woImportZonesForm.hidden = true;
   woImportZonesError.hidden = true;
@@ -2105,8 +2253,12 @@ async function showWoDetailMap(workOrder) {
   woMapLayersByCode = new Map();
   woMapHighlightedCode = null;
   woMapFocusedListCode = null;
+  woMapHighlightedSegmentId = null;
   if (woMapHighlightRing) { woMapHighlightRing.remove(); woMapHighlightRing = null; }
   woMapGerkLabel.hidden = true;
+  // Reverted (Matej, 2026-11-14: "zemljevid naj bo pomanjšan by default") —
+  // phone now starts shrunk again, same as desktop; the header-fields-are-
+  // hidden-on-phone change from v4.102 stays regardless of this toggle.
   woMapExpanded = false;
   updateMapExpandState();
 
@@ -2176,7 +2328,6 @@ async function showWoDetailMap(workOrder) {
   if (shapesError || currentDetailWorkOrder?.id !== workOrder.id) return;
 
   currentCapturedPoints = captured || [];
-  renderCapturedPointsList();
 
   currentGerkSegments = segments || [];
   currentGerkShapes = shapes || [];
@@ -2197,9 +2348,10 @@ async function showWoDetailMap(workOrder) {
     if (!row.geojson || kmlCoveredCodes.has(row.gerk_code)) continue;
     const layer = L.geoJSON(row.geojson, { style: WO_MAP_SHAPE_STYLE })
       .bindTooltip(row.gerk_code).addTo(woMapGerkLayer);
+    // GERK name, permanent — shown below zoom 17, where the individual
     layer.on('mouseover', () => highlightGerkRow(row.gerk_code, true));
     layer.on('mouseout',  () => highlightGerkRow(row.gerk_code, false));
-    layer.on('click', () => focusGerkRowFromMap(row.gerk_code));
+    layer.on('click', () => focusAndZoomGerk(row.gerk_code));
     const entry = woMapLayersByCode.get(row.gerk_code) || { marker: null, latlng: null };
     // A compound "A+B+C" code (see get_work_order_gerk_shapes) returns
     // one row per real GERK sharing this same gerk_code — accumulate
@@ -2207,14 +2359,22 @@ async function showWoDetailMap(workOrder) {
     // logic can combine all of them.
     entry.shapes = entry.shapes || [];
     entry.shapes.push(layer);
+    // The instant placeholder pin (plain L.marker, Leaflet's default blue
+    // icon — see the "Plain center-point markers" block above) is now
+    // redundant and was never removed once the real shape arrived (Matej,
+    // 2026-11-14: stray blue markers on DN 138, confirmed this is why).
+    if (entry.marker) { woMapGerkLayer.removeLayer(entry.marker); entry.marker = null; }
     woMapLayersByCode.set(row.gerk_code, entry);
     shapeLayers.push(layer);
   }
   const segmentLayers = [];
   for (const row of (segments || [])) {
     if (!row.segment_geojson) continue;
-    const layer = L.geoJSON(row.segment_geojson, { style: WO_MAP_SEGMENT_STYLE })
+    const baseStyle = segmentBaseStyle(row);
+    const layer = L.geoJSON(row.segment_geojson, { style: baseStyle })
       .addTo(woMapSegmentLayer);
+    layer._wtBaseStyle = baseStyle; // restored after a highlight clears — see highlightGerkOnWoMap
+    if (row.segment_id) woMapSegmentPolygonLayers.set(row.segment_id, layer);
     // Positioned via label_point (PostGIS ST_PointOnSurface, guaranteed
     // inside the polygon) instead of Leaflet's bindTooltip direction:
     // 'center', which uses the layer's BOUNDING-BOX center — for
@@ -2230,7 +2390,7 @@ async function showWoDetailMap(workOrder) {
     }
     layer.on('mouseover', () => highlightGerkRow(row.gerk_code, true));
     layer.on('mouseout',  () => highlightGerkRow(row.gerk_code, false));
-    layer.on('click', () => focusGerkRowFromMap(row.gerk_code));
+    layer.on('click', () => focusAndZoomGerk(row.gerk_code));
     segmentLayers.push(layer);
     // A GERK known only by a text name has no official shape/centroid
     // at all (see highlightGerkOnWoMap) — its imported zones are the
@@ -2239,6 +2399,7 @@ async function showWoDetailMap(workOrder) {
     const entry = woMapLayersByCode.get(row.gerk_code) || { marker: null, latlng: null };
     entry.zoneLayers = entry.zoneLayers || [];
     entry.zoneLayers.push(layer);
+    if (entry.marker) { woMapGerkLayer.removeLayer(entry.marker); entry.marker = null; }
     woMapLayersByCode.set(row.gerk_code, entry);
     for (const p of (row.points || [])) {
       const [lng, lat] = p.geojson.coordinates;
@@ -2250,6 +2411,45 @@ async function showWoDetailMap(workOrder) {
         woMapSegmentPointLayers.get(row.segment_id).push({ layer: ptLayer, pointNo: p.point_no });
       }
     }
+  }
+
+  // GERK name labels — shown below zoom WO_MAP_LABEL_MIN_ZOOM, where the
+  // segment-number pills are hidden instead (Matej, 2026-11-14); falls back
+  // to the customer's name when the field itself has none. One pass
+  // over woMapLayersByCode rather than inside the shapeLayers loop above:
+  // a GERK with an imported KML zone has its official .shapes skipped
+  // entirely (kmlCoveredCodes, above), so a label tied only to .shapes
+  // never appeared for exactly the GERKs that actually have segments to
+  // zoom out from (confirmed missing on a real 15-segment GERK, Matej
+  // 2026-11-14). Falls back to .zoneLayers' combined bounds in that case.
+  // No field name at all (Matej, 2026-11-14, reverted the customer-name
+  // version — wrong fallback; see DN 150's Zečević 1..6, hand-typed names
+  // used directly as the gerk_code with no separate `fields.name`) — falls
+  // back to the GERK code itself, which for exactly these cases already
+  // reads as a real name.
+  for (const [code, entry] of woMapLayersByCode) {
+    const fieldName = fields.find(f => f.code === code)?.name;
+    const labelText = (fieldName && fieldName !== code) ? fieldName : code;
+    if (!labelText) continue;
+    const boundsSource = entry.shapes?.length ? entry.shapes : entry.zoneLayers;
+    if (!boundsSource?.length) continue;
+    let combined = boundsSource[0].getBounds();
+    for (const l of boundsSource.slice(1)) combined = combined.extend(l.getBounds());
+    const nameLabel = L.tooltip({ permanent: true, direction: 'center', className: 'wo-map-gerk-name-label' })
+      .setLatLng(combined.getCenter())
+      .setContent(labelText)
+      .addTo(woMapGerkLayer);
+    // Stored on the same entry so "Skrij izvedene" can hide the name label
+    // too, not just the shape/zone underneath it (Matej, 2026-11-14).
+    entry.nameLabel = nameLabel;
+    // Clickable too (Matej, 2026-11-14: "tudi klik na napis naj približa
+    // gerk in pokaže gerk na seznamu, ne samo klik na polje") — the field
+    // itself can be a sliver at this zoom level, easy to miss; the label
+    // is a much bigger, easier target. CSS (.wo-map-gerk-name-label)
+    // re-enables pointer-events, which Leaflet's own tooltip base style
+    // disables by default so tooltips don't block clicks on what's under
+    // them — fine for a hover tip, not for one meant to be clicked.
+    nameLabel.getElement()?.addEventListener('click', () => focusAndZoomGerk(code));
   }
 
   // Fit to whatever real shape data exists — official GERK boundaries
@@ -2269,6 +2469,23 @@ async function showWoDetailMap(workOrder) {
 
   drawCapturedPointsOnMap();
   updateGerkMapLinksFromShapes();
+  updateMapCompletedVisibility();
+  woDetailMap.classList.toggle('wo-map-labels-hidden', map.getZoom() < WO_MAP_LABEL_MIN_ZOOM);
+}
+
+// "Skrij izvedene" (Matej, 2026-11-13) — removes a completed GERK's shapes/
+// zones from the map layer groups entirely (not just dimmed) rather than
+// per-feature, since woMapLayersByCode is keyed by gerk_code and each entry
+// can hold several real shapes/zones (compound codes, multiple KML zones).
+function updateMapCompletedVisibility() {
+  if (!woMap) return;
+  for (const [code, entry] of woMapLayersByCode) {
+    const row = workLogGerkRowsEl.querySelector(`.wlg-row[data-code="${CSS.escape(code)}"]`);
+    const hide = wlgHideCompleted && !!row?.classList.contains('wlg-row--completed');
+    (entry.shapes || []).forEach(l => { if (hide) woMapGerkLayer.removeLayer(l); else woMapGerkLayer.addLayer(l); });
+    (entry.zoneLayers || []).forEach(l => { if (hide) woMapSegmentLayer.removeLayer(l); else woMapSegmentLayer.addLayer(l); });
+    if (entry.nameLabel) { if (hide) woMapGerkLayer.removeLayer(entry.nameLabel); else woMapGerkLayer.addLayer(entry.nameLabel); }
+  }
 }
 
 // The 📍 link next to each GERK row falls back to fields.centroid_lat/
@@ -2331,7 +2548,12 @@ function drawCapturedPointsOnMap() {
         iconSize: [20, 20],
         iconAnchor: [10, 10],
       }),
-    }).addTo(woMapCapturedLayer);
+    }).bindPopup(`
+        <div class="wo-capture-popup">
+          <span>Točka ${escHtml(String(p.point_no))}</span>
+          <button type="button" class="wo-capture-item-remove" data-action="wo-capture-remove" data-point-id="${escHtml(p.id)}">✕ Izbriši</button>
+        </div>`)
+      .addTo(woMapCapturedLayer);
   }
 }
 
@@ -2352,18 +2574,18 @@ function renderGerkSegmentationInfo() {
     segs.get(row.segmentation_id).count++;
   }
 
-  // Icon-only — full detail (type/count/validity) lives in the title
-  // tooltip instead of always-visible text. For admins the icon itself
-  // is the remove action (confirm() below is the safety net against a
-  // stray click); everyone else just gets a static indicator.
+  // Admin-only now (Matej, 2026-11-14: "odstrani iz navadnega načina,
+  // admin naj še vedno vidi") — regular users no longer get even the
+  // static indicator; the icon itself is still the admin's remove action
+  // (confirm() in removeGerkSegmentation() is the safety net against a
+  // stray click). Full detail (type/count/validity) lives in the title
+  // tooltip instead of always-visible text.
   workLogGerkRowsEl.querySelectorAll('.wlg-segmentation-info').forEach(el => {
     const list = byGerk.get(el.dataset.code);
-    if (!list) { el.innerHTML = ''; return; }
+    if (!list || !isAdminView()) { el.innerHTML = ''; return; }
     el.innerHTML = Array.from(list.values()).map(s => {
       const detail = `${s.type} · ${s.count} ${s.count === 1 ? 'cona' : 'con'} · velja od ${fmtSampleDate(s.validFrom)}${s.validTo ? ' do ' + fmtSampleDate(s.validTo) : ''}`;
-      return isAdminView()
-        ? `<button type="button" class="wlg-segmentation-icon" data-action="wlg-remove-segmentation" data-segmentation-id="${escHtml(s.id)}" title="${escHtml(detail)} — klikni za odstranitev">🌐</button>`
-        : `<span class="wlg-segmentation-icon" title="${escHtml(detail)}">🌐</span>`;
+      return `<button type="button" class="wlg-segmentation-icon" data-action="wlg-remove-segmentation" data-segmentation-id="${escHtml(s.id)}" title="${escHtml(detail)} — klikni za odstranitev">🌐</button>`;
     }).join('');
     el.querySelectorAll('[data-action="wlg-remove-segmentation"]').forEach(btn => {
       btn.addEventListener('click', () => removeGerkSegmentation(btn));
@@ -2383,14 +2605,6 @@ async function removeGerkSegmentation(btn) {
     showFormError(e.message || 'Napaka pri odstranjevanju con.');
     btn.disabled = false;
   }
-}
-
-function renderCapturedPointsList() {
-  woCaptureList.innerHTML = currentCapturedPoints.map(p => `
-    <div class="wo-capture-item" data-id="${escHtml(p.id)}" data-lat="${p.lat}" data-lng="${p.lng}">
-      <span>Točka ${p.point_no}</span>
-      <button type="button" class="wo-capture-item-remove" data-action="wo-capture-remove" aria-label="Izbriši točko">✕</button>
-    </div>`).join('');
 }
 
 // Dedicated slot, not the shared showFormError — that alert lives far
@@ -2451,7 +2665,6 @@ async function captureGerkPoint() {
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] : data;
     currentCapturedPoints.push(result);
-    renderCapturedPointsList();
     drawCapturedPointsOnMap();
     showCaptureToast(`✓ Točka ${result.point_no} zajeta`);
   } catch (e) {
@@ -2462,30 +2675,27 @@ async function captureGerkPoint() {
   }
 }
 
-async function removeCapturedPoint(btn) {
-  const item = btn.closest('.wo-capture-item');
-  const id = item.dataset.id;
+// Deleting a point now happens from its own marker's map popup (Matej,
+// 2026-11-14: "seznama točk ne rabimo") rather than a list row.
+async function removeCapturedPoint(id) {
   woCaptureError.hidden = true;
-  btn.disabled = true;
   try {
     const { error } = await supabase.rpc('remove_gerk_captured_point', { p_point_id: id });
     if (error) throw error;
     currentCapturedPoints = currentCapturedPoints.filter(p => p.id !== id);
-    renderCapturedPointsList();
     drawCapturedPointsOnMap();
   } catch (e) {
     showCaptureError(e.message || 'Napaka pri brisanju točke.');
-    btn.disabled = false;
   }
 }
 
 woCaptureBtn.addEventListener('click', captureGerkPoint);
 woCaptureShowPoints.addEventListener('change', drawCapturedPointsOnMap);
-woCaptureList.addEventListener('click', e => {
+// Delegated on document, not the map container — the popup's DOM node
+// lives in a Leaflet pane outside #woDetailMap's own element.
+document.addEventListener('click', e => {
   const removeBtn = e.target.closest('[data-action="wo-capture-remove"]');
-  if (removeBtn) { removeCapturedPoint(removeBtn); return; }
-  const item = e.target.closest('.wo-capture-item');
-  if (item) openMapModal(Number(item.dataset.lat), Number(item.dataset.lng), item.querySelector('span').textContent);
+  if (removeBtn) removeCapturedPoint(removeBtn.dataset.pointId);
 });
 
 function startWatchingMyLocationOnWoMap() {
@@ -2670,6 +2880,7 @@ woIzvajalecEdit.addEventListener('change', async () => {
 function closeModal() {
   hideModalAnimated(formModal);
   document.body.style.overflow = '';
+  formModal.classList.remove('wo-modal--map-expanded');
   stopWatchingMyLocationOnWoMap();
   // Without this, a GERK selection left checked when the order was closed
   // kept wlgSelectionBar floating over the main list afterward — stacked
@@ -2954,6 +3165,9 @@ function wireGerkRowButtons() {
   });
   workLogGerkRowsEl.querySelectorAll('[data-action="wlg-add-name"]').forEach(btn => {
     btn.addEventListener('click', () => addFieldName(btn));
+  });
+  workLogGerkRowsEl.querySelectorAll('[data-action="wlg-zoom-segment"]').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); zoomToSampleSegment(btn.dataset.sampleId, btn.dataset.gerkCode); });
   });
   workLogGerkRowsEl.querySelectorAll('[data-action="wlg-samples-toggle"]').forEach(btn => {
     btn.addEventListener('click', () => toggleGerkSamples(btn));

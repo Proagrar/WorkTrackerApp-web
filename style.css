@@ -1139,11 +1139,19 @@ input, select, textarea { font-family: inherit; }
 /* "Don't collect this one" comments ("ne", "ne pobereš"/"ne poberes")
    flagged red — both the row and its comment input, plus a dot on the
    collapsed toggle so it's visible without expanding the panel. */
-.wlg-sample-row--flagged { background: var(--error-bg); }
+/* Black/red, not the light-red used elsewhere for errors (Matej,
+   2026-11-13: "črna/rdeče da ne pobereš") — needs to stand out clearly
+   against the "združi" group-color rows nearby, which also tint the row
+   background. Inline style on the <tr> (renderSamplesSection) sets the
+   actual background/text color; this class is the fallback/selector hook
+   and still styles the nested inputs. */
+.wlg-sample-row--flagged { background: #000; color: #F87171; }
+.wlg-sample-row--flagged td { color: #F87171; }
+.wlg-sample-row--flagged .sample-field-input { background: #1a1a1a; color: #F87171; border-color: #DC2626; }
 .wlg-comment-input--flagged {
-  border-color: var(--error);
-  background: var(--error-bg);
-  color: var(--error);
+  border-color: #DC2626;
+  background: #1a1a1a;
+  color: #F87171;
   font-weight: 600;
 }
 .wlg-sample-flag-dot {
@@ -1184,7 +1192,25 @@ input, select, textarea { font-family: inherit; }
   color: var(--text-primary);
 }
 
-.wlg-gerk-label-row { display: flex; align-items: center; gap: 8px; }
+.wlg-gerk-label-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Moved onto the map itself, in .wo-map-top-left-controls below "Ceste/
+   imena" (Matej, 2026-11-14) — same pill look as .wo-map-layers-btn,
+   since it's now a map overlay control rather than a plain form label. */
+.wo-map-hide-completed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .85);
+  color: var(--text-primary);
+  font-size: .75rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wo-map-hide-completed-toggle input { width: 13px; height: 13px; cursor: pointer; }
 .wlg-select-all-label { display: flex; align-items: center; cursor: pointer; }
 .wlg-search-input {
   margin-left: auto;
@@ -1303,6 +1329,7 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   padding: 2px 6px;
 }
 .wlg-remove-sample:hover { color: var(--danger); }
+.wlg-zoom-segment-btn { width: 24px; height: 24px; font-size: .75rem; flex-shrink: 0; }
 
 /* ── Work order header: start/status button + meta ─────────── */
 
@@ -1985,6 +2012,15 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   font-size: 1.0625rem;
   font-weight: 700;
   letter-spacing: -.01em;
+  /* Title can now carry "<stevilka> - <stranka>" (Matej, 2026-11-14) —
+     needs to actually truncate instead of overflowing/pushing the back/X
+     buttons, which a bare order number never risked before. */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .work-form {
@@ -2045,10 +2081,17 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   top: 8px;
   right: 8px;
   max-height: 50%;
-  width: 128px;
+  /* fit-content, not a flat 128px — when the capture button is hidden
+     (order not Plan/V delu) only the "Točke" checkbox is left, and the
+     fixed width left a big empty translucent box beside it (Matej,
+     2026-11-14, confirmed on a real Izvedeno order). max-width still caps
+     it when the button IS showing and needs room for its label. */
+  width: fit-content;
+  max-width: 128px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
   padding: 8px;
   background: rgba(255, 255, 255, .55);
@@ -2057,15 +2100,13 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   overflow-y: auto;
 }
 
-/* Highlighted GERK's name, floated over the map — purely informational
-   (pointer-events: none) so it never blocks dragging/zooming under it. */
+/* Highlighted GERK's name — purely informational (pointer-events: none) so
+   it never blocks dragging/zooming under it. Moved (Matej, 2026-11-14) from
+   a hand-tuned top-center absolute position (which needed repeated +10px
+   nudges) into .wo-map-top-left-controls' own flex column, directly below
+   "Ceste/imena" — no more magic-number positioning. */
 .wo-map-gerk-label {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  max-width: calc(100% - 160px);
+  max-width: 220px;
   padding: 5px 12px;
   background: rgba(255, 255, 255, .85);
   color: var(--text-primary);
@@ -2114,7 +2155,10 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .wo-map-top-left-controls {
   position: absolute;
   top: 13px;
-  left: 58px;
+  /* Used to clear Leaflet's +/- zoom control, which shared this corner —
+     removed in v4.121, so this just needs a minimal edge margin now
+     (Matej, 2026-11-14: "ne čist ob rob, minimalen odmik od roba"). */
+  left: 8px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -2226,17 +2270,50 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 .wlg-compact-row .wlg-toggle-btn { height: 32px; padding: 0 10px; font-size: .75rem; }
 .wlg-compact-row .wlg-time-value { font-size: .75rem; min-width: 0; }
 
-.wo-capture-btn { width: 100%; white-space: normal; }
+.wo-capture-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wo-capture-btn { flex: 1 1 auto; width: auto; white-space: normal; }
 
 .wo-capture-toggle {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
   font-size: .5625rem;
   color: var(--text-secondary);
   cursor: pointer;
 }
-.wo-capture-toggle input { width: 11px; height: 11px; cursor: pointer; }
+/* appearance: none + a fixed box, not just width/height on the native
+   control — some mobile browsers render a checkbox at a minimum native
+   touch size regardless of explicit width/height, which next to this
+   row's tiny 9px text looked like the checkbox's own box was twice as
+   wide as the "Točke" label itself (Matej, 2026-11-14). */
+.wo-capture-toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+.wo-capture-toggle input:checked {
+  background: var(--blue-800, #1D4ED8);
+  border-color: var(--blue-800, #1D4ED8);
+  position: relative;
+}
+.wo-capture-toggle input:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 3px;
+  height: 6px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
 
 /* Permanent (always-on, not hover-only) Leaflet tooltip showing each
    imported zone's segment number, centered on its polygon. Overrides
@@ -2253,6 +2330,29 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   box-shadow: 0 1px 3px rgba(0,0,0,.4);
   white-space: nowrap;
 }
+/* Below zoom 17 (ensureWoMap's zoomend listener in app.js), zone outlines/
+   colors stay but the number pills hide — zoomed out, many overlapping
+   segments turn into unreadable clutter otherwise (Matej, 2026-11-14). */
+.wo-detail-map.wo-map-labels-hidden .leaflet-tooltip.wo-map-segment-label { display: none; }
+/* GERK name label — the inverse: only below zoom 17, where the segment
+   numbers above are hidden (Matej, 2026-11-14). */
+.leaflet-tooltip.wo-map-gerk-name-label {
+  background: #2455AA;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: .75rem;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  white-space: nowrap;
+  /* Leaflet's own tooltip base style sets pointer-events:none so a hover
+     tip never blocks clicks on what's under it — re-enabled here since
+     this one is meant to be clicked (Matej, 2026-11-14). */
+  pointer-events: auto;
+  cursor: pointer;
+}
+.wo-detail-map:not(.wo-map-labels-hidden) .leaflet-tooltip.wo-map-gerk-name-label { display: none; }
 
 .wo-capture-marker {
   display: flex;
@@ -2270,38 +2370,24 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
 }
 
 .wo-capture-error {
+  align-self: stretch;
   padding: 6px 8px;
   font-size: .6875rem;
   line-height: 1.3;
 }
 
-.wo-capture-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.wo-capture-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--border-light);
-  font-size: .75rem;
-  cursor: pointer;
-}
-
+/* Captured-point marker's popup (Matej, 2026-11-14) — deleting a point now
+   happens here instead of a separate list window. */
+.wo-capture-popup { display: flex; align-items: center; gap: 8px; font-size: .8125rem; }
 .wo-capture-item-remove {
   appearance: none;
   border: none;
   background: none;
-  padding: 0 2px;
-  color: var(--text-muted);
+  padding: 2px 4px;
+  color: var(--danger, #DC2626);
   cursor: pointer;
-  font-size: .875rem;
-  line-height: 1;
+  font-size: .8125rem;
+  font-weight: 600;
 }
 
 @media (min-width: 900px) {
@@ -2468,48 +2554,32 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   .wo-header-stranka, #woStatusBadge, #woHeaderMeta {
     display: none;
   }
-  .wo-header-summary {
-    display: block;
-    font-size: .8125rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 2px 0;
-  }
+  /* Removed outright (Matej, 2026-11-14) — with .wo-header-fields already
+     hidden on phone (v4.102), this one-line summary was the only thing
+     left in the header besides back/title/X, and isn't wanted either. */
+  .wo-header-summary { display: none; }
   /* iOS status bar / Dynamic Island sits right over the fixed-position
      sheet's top edge once it's fullscreen (no bottom-sheet margin to
      absorb it any more) — top padding extended by the real inset instead
      of a flat value so it degrades safely to plain 10px on a non-notched
      phone (env() resolves to 0 there). */
   .modal-head.wo-modal-head { gap: 4px; padding: calc(10px + env(safe-area-inset-top)) 14px 6px; }
-  .wo-header-fields { gap: 6px; }
+  /* Date/izvajalec/datum vzorčenja/status edit controls aren't needed on
+     phone at all (Matej, 2026-11-14: "ne potrebujemo teh polj v takem
+     pogledu na mobilni napravi") — the summary line above already carries
+     date/izvajalec/status, and removing this block is what lets the map
+     take that space instead, in both the shrunk and expanded states (the
+     latter already hid the whole header via .wo-modal--map-expanded). */
+  .wo-header-fields { display: none; }
 
-  /* Date/status: plain text + pencil instead of an always-visible
-     input/select — tap to reveal the real control (toggleWoDateEdit()/
-     woStatusEditBtn's handler in app.js). */
-  .wo-date-summary { display: inline-block; font-size: .8125rem; font-weight: 600; }
-  .wo-date-edit-btn { display: inline-flex; width: 28px; height: 28px; }
-  /* :not([hidden]), not a flat override — app.js still controls whether
-     this shows at all (admin + phone only) via the hidden attribute;
-     this just supplies its phone-only visual when it's not hidden. */
-  .wo-status-edit-btn:not([hidden]) { display: inline-flex; width: 28px; height: 28px; }
-  .wo-date-panel[hidden] { display: none; }
-  .wo-date-panel:not([hidden]) { margin-top: 4px; width: 100%; }
-
-  /* Čas na poti + Opomba now live outside #workLogForm on phone (JS
-     physically relocates them — see layoutWoDetailSections() in
-     app.js): the entry row sits above the map, the opomba input right
-     below it, as direct flex children of .wo-detail-layout. Desktop
-     keeps both nested inside #workLogForm exactly as before — none of
-     this block's selectors reach there. */
+  /* Čas na poti/traktor + Opomba: same "not needed on phone" call as
+     .wo-header-fields above — hidden outright rather than relocated.
+     Desktop is untouched (these selectors are phone-only; desktop keeps
+     both nested inside #workLogForm exactly as before). */
   .wo-detail-layout > #woTravelTimeField,
   .wo-detail-layout > #roadComment {
-    flex-shrink: 0;
-    margin: 0 14px;
+    display: none;
   }
-  .wo-detail-layout > #woTravelTimeField { margin-top: 10px; }
 
   /* The add-row controls used the same 46px/16px inputs as every other
      form field. Selects are shrunk the same way the header's own
@@ -2563,6 +2633,12 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
   }
   .wo-detail-layout:not(.wo-detail-layout--map-expanded) #workLogForm.wo-detail-content {
     flex: 0 1 auto;
+    /* Pushes the list down 20px — since the map above is flex:1 (fills
+       whatever the list doesn't use), this 20px comes straight off the
+       list's own claimed space and goes to the map instead, growing it
+       by the same amount (Matej, 2026-11-14: "premakni seznam za 20px
+       dol, za isto širino razširi tudi zemljevid"). */
+    margin-top: 20px;
   }
 
   /* #workLogForm now wraps only the GERKI field on phone (Čas na poti
@@ -2641,7 +2717,19 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     max-height: none;
   }
   .wo-detail-layout--map-expanded .wo-detail-content { display: none; }
-  .wo-map-top-left-controls { top: 10px; left: 54px; }
+  /* Full-screen map on phone (Matej, 2026-11-13: "skrij tudi header") —
+     the modal's own title/close bar and drag handle give up their space
+     too, not just the content below the map. Toggled on #formModal itself
+     (updateMapExpandState in app.js) rather than relying on a CSS :has()
+     selector reaching up from .wo-detail-layout. */
+  .wo-modal--map-expanded .modal-head,
+  .wo-modal--map-expanded .modal-handle { display: none; }
+  /* Hiding the header above removes the only thing that reserved the
+     camera/notch's safe area — without this the map's top edge (and
+     Leaflet's zoom buttons) went straight under it (Matej, 2026-11-14:
+     "zgornji rob zemljevida mora biti pod nivojem kamere"). */
+  .wo-modal--map-expanded .wo-detail-layout { padding-top: env(safe-area-inset-top); }
+  .wo-map-top-left-controls { top: 10px; left: 8px; }
   /* Razširi moves to the map's bottom-right corner on phone (Matej,
      2026-11-10) — out of the way of Ceste/imena and Leaflet's zoom
      control, which otherwise share the top-left corner. */
@@ -2679,19 +2767,17 @@ button.wlg-segmentation-icon:hover { background: var(--error-bg); }
     flex: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
+    /* Row 1 (search/Skrij izvedene) sized to its own content; row 2
+       (card + pager) takes all remaining height instead of leaving it as
+       blank space below — Matej, 2026-11-14: "spodnje polje naj bo tudi
+       zapolnjeno". The card itself then stretches into that row (see
+       .wlg-table .wlg-row below) instead of just sitting at the top of it. */
+    grid-template-rows: auto 1fr;
     column-gap: 8px;
-    /* Without this, the grid's default align-content (stretch) spreads
-       any leftover height — whenever the GERK info is shorter than the
-       flex-allocated space — into BOTH "auto" rows, inflating the
-       label's own row into a tall gap above the card and padding the
-       card out at the bottom. start packs both rows to their real
-       content size and leaves any extra space below row 2, where it
-       just reads as (harmless) blank space instead of a stretched gap. */
-    align-content: start;
   }
   .wo-gerk-field > .field-label { grid-column: 1 / -1; }
-  .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; }
+  .wlg-table { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .wlg-table .wlg-row:not([hidden]) { flex: 1; min-height: 0; overflow-y: auto; }
   /* No forced min-height here (an earlier version used one, ~42dvh, to
      keep the card looking tall even with sparse content) — on top of
      the header/Čas na poti/map/opomba already above it, that floor
