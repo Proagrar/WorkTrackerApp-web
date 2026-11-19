@@ -9,6 +9,16 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
 // delovni_nalogi_vzorci.box_id (supabase/migration_sample_boxes.sql).
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// SheetJS, loaded only when the Eurofins export actually runs — same lazy
+// pattern as fertilization.js's own loadSheetJs (own copy, not worth
+// importing across modules for one tiny loader).
+const SHEETJS_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
+let XLSX = null;
+async function loadSheetJs() {
+  if (!XLSX) XLSX = await import(SHEETJS_URL);
+  return XLSX;
+}
+
 const els = {
   tab: document.getElementById('tabSledenje'),
   subnavBtns: document.querySelectorAll('[data-sled-view]'),
@@ -31,20 +41,30 @@ const els = {
   orderGerks: document.getElementById('sledOrderGerks'),
   orderBoxesWrap: document.getElementById('sledOrderBoxesWrap'),
   orderBoxRows: document.getElementById('sledOrderBoxRows'),
-  segSearch: document.getElementById('sledSegSearch'),
+  segSearchSeg: document.getElementById('sledSegSearchSeg'),
+  segSearchGerk: document.getElementById('sledSegSearchGerk'),
+  segSearchStranka: document.getElementById('sledSegSearchStranka'),
   segHead: document.getElementById('sledSegHead'),
   segRows: document.getElementById('sledSegRows'),
   segStatusFilterBtn: document.getElementById('sledSegStatusFilterBtn'),
   segStatusFilterMenu: document.getElementById('sledSegStatusFilterMenu'),
+  segHideBoxedCb: document.getElementById('sledSegHideBoxedCb'),
   segSelectAllCb: document.getElementById('sledSegSelectAllCb'),
   segSelectionBar: document.getElementById('sledSegSelectionBar'),
   viewBoxes: document.getElementById('sledViewBoxes'),
   toolbarBoxes: document.getElementById('sledToolbarBoxes'),
   boxSearch: document.getElementById('sledBoxSearch'),
   boxRows: document.getElementById('sledBoxRows'),
+  boxSelectAllCb: document.getElementById('sledBoxSelectAllCb'),
+  boxSelectionBar: document.getElementById('sledBoxSelectionBar'),
   boxModal: document.getElementById('sledBoxModal'),
   boxModalClose: document.getElementById('sledBoxModalClose'),
   boxModalTitle: document.getElementById('sledBoxModalTitle'),
+  sendDateModal: document.getElementById('sledSendDateModal'),
+  sendDateModalClose: document.getElementById('sledSendDateModalClose'),
+  sendDateInput: document.getElementById('sledSendDateInput'),
+  sendDateCancelBtn: document.getElementById('sledSendDateCancelBtn'),
+  sendDateConfirmBtn: document.getElementById('sledSendDateConfirmBtn'),
   boxContentRows: document.getElementById('sledBoxContentRows'),
 };
 
@@ -59,6 +79,7 @@ let mmInvoiceById = {}; // minimax_racun_id -> mm_issued_invoices row (admin-onl
 let currentOrderId = null;
 let selectedOrderIds = new Set();
 let selectedSegIds = new Set(); // Segmenti view — sample (delovni_nalogi_vzorci) ids
+let selectedBoxIds = new Set(); // Škatle view — sample_boxes ids
 // Default (Matej, 2026-11-06): Izvedeno + Delno prejeta analiza + Analiza
 // prejeta — the ones actually worth watching day to day; everything else
 // requires explicitly widening the filter. Seeded from the checkboxes'
@@ -67,8 +88,8 @@ let selectedSegIds = new Set(); // Segmenti view — sample (delovni_nalogi_vzor
 let sledStatusFilterValues = new Set([...document.querySelectorAll('.sled-status-filter-cb:checked')].map(cb => cb.value));
 let sledInvoiceStatusFilterValues = new Set([...document.querySelectorAll('.sled-invoice-status-filter-cb:checked')].map(cb => cb.value));
 let sledSegStatusFilterValues = new Set([...document.querySelectorAll('.sled-seg-status-filter-cb:checked')].map(cb => cb.value));
-let segSortKey = 'segment';
-let segSortDir = 'asc';
+let segSortKey = 'nalog';
+let segSortDir = 'desc';
 const textCollator = new Intl.Collator('sl', { numeric: true, sensitivity: 'base' });
 
 function esc(value) {
@@ -135,12 +156,14 @@ async function loadAll() {
   els.orderRows.innerHTML = `<tr><td colspan="12" class="fert-empty">Nalaganje …</td></tr>`;
   const [{ data: orderData, error: orderError }, { data: boxData, error: boxError }, { data: mmInvoices }] = await Promise.all([
     supabase.from('delovni_nalogi')
-      .select(`id, stevilka, status, ustvarjen, deleted_at, racun_zahtevan_at, racun_napaka,
-        minimax_racun_id, minimax_racun_stevilka, minimax_racun_status, datum_vzorcenja,
+      .select(`id, stevilka, status, ustvarjen, deleted_at, datum_vzorcenja,
         zakljucen_brez_racuna_at, opomba_zakljucek, stranka_id,
         customers(naziv, company_name, minimax_customer_id, vat_number), profiles(full_name),
         delovni_nalogi_gerki(id, gerk_code, kolicina_ha, field_id, fields(name),
-          delovni_nalogi_vzorci(id, sample_no, box_id, sampling_note, area_ha, sample_boxes(id, label, status, sent_at), lab_soil_result(${LAB_COLS})))`)
+          delovni_nalogi_vzorci(id, sample_no, box_id, sampling_note, area_ha, sample_boxes(id, label, status, sent_at), lab_soil_result(${LAB_COLS}))),
+        delovni_nalogi_racuni(id, stevilka_racuna, rezim, delez_odstotek, opomba, racun_zahtevan_at,
+          minimax_racun_id, minimax_racun_stevilka, minimax_racun_status, racun_napaka,
+          delovni_nalogi_racuni_gerki(delovni_nalog_gerk_id))`)
       .is('deleted_at', null)
       .order('ustvarjen', { ascending: false }),
     supabase.from('sample_boxes').select('*').order('created_at', { ascending: false }),
@@ -191,8 +214,7 @@ const PIPELINE_BADGE = {
   'Plan': 'fert-badge--neutral',
   'V delu': 'fert-badge--warn',
   'Izvedeno': 'fert-badge--neutral',
-  'Pakiranje vzorcev': 'fert-badge--warn',
-  'Pripravljeni na pošiljanje': 'fert-badge--ok',
+  'Paket v pripravi': 'fert-badge--warn',
   'Poslani': 'fert-badge--sent',
   'Delno prejeta analiza': 'fert-badge--warn',
   'Analiza prejeta': 'fert-badge--ok',
@@ -200,10 +222,12 @@ const PIPELINE_BADGE = {
 
 // Full start-to-finish ladder, in order — the stepper below always has
 // this many segments ("št. stageov prilagodi številu statusov"), filled
-// up to and including the current status's position.
+// up to and including the current status's position. "Pakiranje vzorcev"
+// and "Pripravljeni na pošiljanje" were merged into one "Paket v pripravi"
+// (Matej, 2026-11-19) — partially vs. fully boxed wasn't a distinction
+// worth a whole extra status.
 const STATUS_SEQUENCE = [
-  'Plan', 'V delu', 'Izvedeno', 'Pakiranje vzorcev',
-  'Pripravljeni na pošiljanje', 'Poslani', 'Delno prejeta analiza', 'Analiza prejeta',
+  'Plan', 'V delu', 'Izvedeno', 'Paket v pripravi', 'Poslani', 'Delno prejeta analiza', 'Analiza prejeta',
 ];
 
 function statusStepperSvg(label) {
@@ -239,8 +263,7 @@ function orderStatusLabel(order) {
   const sent = segs.filter(segmentSent).length;
   if (sent === n) return 'Poslani';
   const boxed = segs.filter(segmentBoxed).length;
-  if (boxed === n) return 'Pripravljeni na pošiljanje';
-  if (boxed > 0) return 'Pakiranje vzorcev';
+  if (boxed > 0) return 'Paket v pripravi';
   return 'Izvedeno';
 }
 
@@ -256,12 +279,46 @@ function orderStatusLabel(order) {
 // its own schedule (roughly every 2h, see "Minimax osvezitev"), so a
 // request younger than this is just sync lag, not necessarily wrong.
 const MINIMAX_MIRROR_GRACE_MS = 6 * 60 * 60 * 1000;
-function invoiceStatusLabel(order) {
-  // "Zaključi brez računa" (Matej, 2026-11-11) — a terminal state, never
-  // touches minimax_racun_*/racun_zahtevan_at, so it's checked first.
-  if (order.zakljucen_brez_racuna_at) return 'Zaključeno brez računa';
-  if (order.minimax_racun_id) {
-    const inv = mmInvoiceById[order.minimax_racun_id];
+
+// Multi/partial invoice support (16.11.2026) — an order's old single flat
+// minimax_racun_*/racun_* columns are gone; every invoice REQUEST is now
+// its own row in delovni_nalogi_racuni (nested in the loadAll() select
+// above), locked to one "rezim" per order ('gerki' = covers specific GERK
+// lines via its own delovni_nalogi_racuni_gerki junction rows, 'odstotek' =
+// covers a percentage of the whole order, no GERK subset at all). An order
+// can have several racun rows over time — the status/action cells below
+// render one line per row instead of one fixed status for the whole order.
+function racuniOf(order) { return order.delovni_nalogi_racuni || []; }
+function rezimLocked(order) {
+  const r = racuniOf(order);
+  return r.length ? r[0].rezim : null;
+}
+function invoicedGerkIds(order) {
+  const ids = new Set();
+  for (const r of racuniOf(order)) for (const g of (r.delovni_nalogi_racuni_gerki || [])) ids.add(g.delovni_nalog_gerk_id);
+  return ids;
+}
+function remainingHa(order) {
+  const invoiced = invoicedGerkIds(order);
+  return (order.delovni_nalogi_gerki || []).reduce((s, g) => invoiced.has(g.id) ? s : s + (Number(g.kolicina_ha) || 0), 0);
+}
+function remainingPercent(order) {
+  const used = racuniOf(order).filter(r => r.rezim === 'odstotek').reduce((s, r) => s + (Number(r.delez_odstotek) || 0), 0);
+  return Math.max(0, 100 - used);
+}
+// Whether "+ nov račun" should still show at all — true for an order with
+// no racun rows yet (nothing requested) or one that hasn't covered its
+// full ha/100% yet under its locked rezim.
+function hasRemainingToInvoice(order) {
+  return rezimLocked(order) === 'odstotek' ? remainingPercent(order) > 0.001 : remainingHa(order) > 0.001;
+}
+// One racun row's status label — same shape invoiceStatusLabel used to
+// compute for the whole order, now per-row (a row with no minimax_racun_id
+// yet is either pending or errored, handled by invoiceRowActionIcon instead
+// of a status label at all, same as before).
+function racunStatusLabel(racun) {
+  if (racun.minimax_racun_id) {
+    const inv = mmInvoiceById[racun.minimax_racun_id];
     if (inv) {
       if (inv.document_status === 'O') return 'Osnutek računa';
       if (inv.payment_status === 'Placan') return 'Račun plačan';
@@ -274,23 +331,35 @@ function invoiceStatusLabel(order) {
     // Minimax and this app's own racun_* fields are now stale (Matej,
     // 2026-11-12: DN 139/Andrej Žura — ERP said "Račun izdan", Minimax had
     // nothing). Trusting minimax_racun_status here would repeat that.
-    const requestedAt = order.racun_zahtevan_at ? new Date(order.racun_zahtevan_at).getTime() : 0;
+    const requestedAt = racun.racun_zahtevan_at ? new Date(racun.racun_zahtevan_at).getTime() : 0;
     const freshEnough = requestedAt && (Date.now() - requestedAt) < MINIMAX_MIRROR_GRACE_MS;
     if (!freshEnough) return 'Preveri v Minimaxu';
   }
-  if (order.minimax_racun_status === 'izstavljen') return 'Račun izdan';
-  if (order.minimax_racun_status === 'storniran') return 'Račun storniran';
-  if (order.minimax_racun_status === 'osnutek') return 'Osnutek računa';
+  if (racun.minimax_racun_status === 'izstavljen') return 'Račun izdan';
+  if (racun.minimax_racun_status === 'storniran') return 'Račun storniran';
+  if (racun.minimax_racun_status === 'osnutek') return 'Osnutek računa';
   return 'Račun ni izdan';
 }
-// Which actual Minimax invoice this order's draft/invoice became (Matej,
+// Whole-order status, kept for the invoice-status FILTER dropdown only
+// (one value per order there, same UX as before) — the most "active" row
+// wins, or the terminal/zero-request labels when there's nothing to pick.
+function invoiceStatusLabel(order) {
+  if (order.zakljucen_brez_racuna_at) return 'Zaključeno brez računa';
+  const rows = racuniOf(order);
+  if (!rows.length) return 'Račun ni izdan';
+  const PRIORITY = ['Preveri v Minimaxu', 'Osnutek računa', 'Račun izdan', 'Račun plačan', 'Račun storniran'];
+  const labels = rows.map(racunStatusLabel);
+  for (const p of PRIORITY) if (labels.includes(p)) return p;
+  return labels[0];
+}
+// Which actual Minimax invoice a racun row's draft/invoice became (Matej,
 // 2026-11-12: "kateri račun je bil narejen iz naloga") — same "YYYY-NNN"
 // label Minimax itself uses (and the same convention the external
 // Nalogi_povezovanje reconciliation report already uses). Needs the mirror
 // row (mmInvoiceById); a brand-new draft the mirror hasn't synced yet has
 // no number to show.
-function invoiceNumberLabel(order) {
-  const inv = order.minimax_racun_id ? mmInvoiceById[order.minimax_racun_id] : null;
+function invoiceNumberLabel(racun) {
+  const inv = racun.minimax_racun_id ? mmInvoiceById[racun.minimax_racun_id] : null;
   return (inv?.year && inv?.invoice_number) ? `${inv.year}-${inv.invoice_number}` : null;
 }
 // Minimax's own invoice-view page — confirmed live 2026-11-12 against two
@@ -298,9 +367,9 @@ function invoiceNumberLabel(order) {
 // minimax_racun_id, pgat=pgatv is just a fixed view-mode flag. Works off
 // minimax_racun_id alone, so the link shows even before the mirror has
 // synced the row invoiceNumberLabel needs.
-function minimaxInvoiceUrl(order) {
-  return order.minimax_racun_id
-    ? `https://moj.minimax.si/SI/VA/WebUI/IzdanRacun/IzdanRacunView.aspx?iracid=${order.minimax_racun_id}&pgat=pgatv`
+function minimaxInvoiceUrl(racun) {
+  return racun.minimax_racun_id
+    ? `https://moj.minimax.si/SI/VA/WebUI/IzdanRacun/IzdanRacunView.aspx?iracid=${racun.minimax_racun_id}&pgat=pgatv`
     : null;
 }
 const INVOICE_BADGE = {
@@ -313,28 +382,56 @@ const INVOICE_BADGE = {
   'Preveri v Minimaxu': 'fert-badge--danger',
 };
 
+// One line per racun row (badge + number/link), used by renderOrders()
+// instead of a single status for the whole order.
+function invoiceStatusCellHtml(order) {
+  if (order.zakljucen_brez_racuna_at) {
+    const cls = INVOICE_BADGE['Zaključeno brez računa'];
+    const title = order.opomba_zakljucek ? ` title="${esc(order.opomba_zakljucek)}"` : '';
+    return `<span class="fert-badge ${cls}"${title}>Zaključeno brez računa</span>`;
+  }
+  const rows = racuniOf(order);
+  if (!rows.length) return `<span class="fert-badge ${INVOICE_BADGE['Račun ni izdan']}">Račun ni izdan</span>`;
+  return rows.map(r => {
+    const label = racunStatusLabel(r);
+    const cls = INVOICE_BADGE[label] ?? 'fert-badge--neutral';
+    const num = invoiceNumberLabel(r);
+    const url = minimaxInvoiceUrl(r);
+    const tag = r.rezim === 'odstotek' ? `${r.delez_odstotek}%` : `#${r.stevilka_racuna}`;
+    const numHtml = num
+      ? ` <span class="sled-invoice-num">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="sled-invoice-link" title="Odpri račun v Minimaxu">${esc(num)} 🔗</a>` : esc(num)}</span>`
+      : '';
+    return `<div class="sled-racun-line"><span class="fert-badge ${cls}" title="Račun ${esc(tag)}">${esc(tag)} · ${esc(label)}</span>${numHtml}</div>`;
+  }).join('');
+}
+
 // Icon-only trigger/retry/cancel (Matej, 2026-11-09: "samo ikono") — this
 // tab is already admin-only at the app.js level (the tab button itself is
 // hidden otherwise), so no separate admin check here. The actual write
 // logic (review modal, retry, cancel) lives in app.js — reached through
 // the window.* bridge it sets up — so it stays the single source of truth
 // for what "Pripravi račun" actually does, not duplicated here.
-function invoiceActionIcon(order) {
+// One icon per ACTIONABLE racun row (pending → cancel, errored → retry),
+// plus a trailing "+" trigger if there's still something left to invoice —
+// an order can show several icons stacked now, not just one.
+function invoiceActionCellHtml(order) {
   if (order.zakljucen_brez_racuna_at) {
     const title = order.opomba_zakljucek ? `Zaključeno brez računa: ${order.opomba_zakljucek} — klikni za preklic` : 'Zaključeno brez računa — klikni za preklic';
     return `<button type="button" class="wo-invoice-btn wo-invoice-btn--pending" data-action="sled-invoice-cancel-no-invoice" data-id="${esc(order.id)}" title="${esc(title)}" aria-label="Zaključeno brez računa, prekliči">↺</button>`;
   }
-  if (order.racun_napaka) {
-    return `<button type="button" class="wo-invoice-btn wo-invoice-btn--error" data-action="sled-invoice-retry" data-id="${esc(order.id)}" title="${esc(order.racun_napaka)} — klikni za ponovni poskus" aria-label="Napaka pri računu, ponovno poskusi">⚠</button>`;
+  const icons = [];
+  for (const r of racuniOf(order)) {
+    if (r.racun_napaka) {
+      icons.push(`<button type="button" class="wo-invoice-btn wo-invoice-btn--error" data-action="sled-invoice-retry" data-racun-id="${esc(r.id)}" title="${esc(r.racun_napaka)} — klikni za ponovni poskus" aria-label="Napaka pri računu, ponovno poskusi">⚠</button>`);
+    } else if (r.racun_zahtevan_at && !r.minimax_racun_id) {
+      icons.push(`<button type="button" class="wo-invoice-btn wo-invoice-btn--pending" data-action="sled-invoice-cancel" data-racun-id="${esc(r.id)}" title="Račun v pripravi — klikni za preklic" aria-label="Račun v pripravi, prekliči">⏳</button>`);
+    }
   }
-  if (order.racun_zahtevan_at && !order.minimax_racun_id) {
-    return `<button type="button" class="wo-invoice-btn wo-invoice-btn--pending" data-action="sled-invoice-cancel" data-id="${esc(order.id)}" title="Račun v pripravi — klikni za preklic" aria-label="Račun v pripravi, prekliči">⏳</button>`;
-  }
-  const eligible = (order.status === 'Izvedeno' || order.status === 'Izdan Račun') && !order.deleted_at && !order.minimax_racun_id && !order.racun_zahtevan_at;
+  const eligible = (order.status === 'Izvedeno' || order.status === 'Izdan Račun') && !order.deleted_at && hasRemainingToInvoice(order);
   if (eligible) {
-    return `<button type="button" class="wo-invoice-btn" data-action="sled-invoice-request" data-id="${esc(order.id)}" title="Pripravi račun" aria-label="Pripravi račun">🧾</button>`;
+    icons.push(`<button type="button" class="wo-invoice-btn" data-action="sled-invoice-request" data-id="${esc(order.id)}" title="${racuniOf(order).length ? 'Pripravi nov račun' : 'Pripravi račun'}" aria-label="Pripravi račun">🧾</button>`);
   }
-  return '';
+  return icons.map(i => `<div class="sled-racun-line">${i}</div>`).join('');
 }
 
 // ── Status filter (multi-select — same button+checklist pattern as the
@@ -455,10 +552,6 @@ function renderOrders() {
     const receivedDate = earliest(segs.flatMap(s => (s.lab_soil_result || []).map(r => r.analysis_date)).filter(Boolean));
     const label = orderStatusLabel(o);
     const cls = PIPELINE_BADGE[label] ?? 'fert-badge--neutral';
-    const invLabel = invoiceStatusLabel(o);
-    const invCls = INVOICE_BADGE[invLabel] ?? 'fert-badge--neutral';
-    const invNum = invoiceNumberLabel(o);
-    const invUrl = minimaxInvoiceUrl(o);
     return `<tr data-open-order="${esc(o.id)}">
       <td><input type="checkbox" class="sled-select-cb" data-id="${esc(o.id)}" aria-label="Izberi nalog" ${selectedOrderIds.has(o.id) ? 'checked' : ''}></td>
       <td>${esc(o.stevilka)}</td>
@@ -472,10 +565,8 @@ function renderOrders() {
       <td><div class="sled-status-cell">
         ${statusStepperSvg(label)}<span class="fert-badge ${cls}">${esc(label)}</span>
       </div></td>
-      <td><span class="fert-badge ${invCls}"${invLabel === 'Zaključeno brez računa' && o.opomba_zakljucek ? ` title="${esc(o.opomba_zakljucek)}"` : ''}>${esc(invLabel)}</span>${invNum ? ` <span class="sled-invoice-num">${invUrl
-        ? `<a href="${esc(invUrl)}" target="_blank" rel="noopener" class="sled-invoice-link" title="Odpri račun v Minimaxu">${esc(invNum)} 🔗</a>`
-        : esc(invNum)}</span>` : ''}</td>
-      <td class="sled-invoice-icon-col">${invoiceActionIcon(o)}</td>
+      <td>${invoiceStatusCellHtml(o)}</td>
+      <td class="sled-invoice-icon-col">${invoiceActionCellHtml(o)}</td>
     </tr>`;
   }).join('');
   updateSelectAllState(rows.map(o => o.id));
@@ -494,14 +585,12 @@ els.orderRows.addEventListener('click', e => {
   }
   const retryBtn = e.target.closest('[data-action="sled-invoice-retry"]');
   if (retryBtn) {
-    const o = orders.find(x => x.id === retryBtn.dataset.id);
-    if (o) window.retryInvoiceRequest?.(o);
+    window.retryInvoiceRequest?.(retryBtn.dataset.racunId);
     return;
   }
   const cancelBtn = e.target.closest('[data-action="sled-invoice-cancel"]');
   if (cancelBtn) {
-    const o = orders.find(x => x.id === cancelBtn.dataset.id);
-    if (o) window.cancelInvoiceRequest?.(o);
+    window.cancelInvoiceRequest?.(cancelBtn.dataset.racunId);
     return;
   }
   const cancelNoInvoiceBtn = e.target.closest('[data-action="sled-invoice-cancel-no-invoice"]');
@@ -535,6 +624,13 @@ els.subnavBtns.forEach(btn => btn.addEventListener('click', () => {
   els.toolbarOrders.hidden = view !== 'orders';
   els.toolbarSegments.hidden = view !== 'segments';
   els.toolbarBoxes.hidden = view !== 'boxes';
+  // Each view's own floating selection bar is a fixed-position element, not
+  // scoped to its view's hidden container — without this it stays visible
+  // (and its selection active) after switching away (Matej, 2026-11-19:
+  // the Segmenti bar kept showing on top of Pošiljke).
+  if (view !== 'orders') clearSelection();
+  if (view !== 'segments') clearSegSelection();
+  if (view !== 'boxes') clearBoxSelection();
 }));
 
 // ── Segmenti view — obrnjena perspektiva: en delovni_nalogi_vzorci vrstica
@@ -550,12 +646,19 @@ function allSegmentRows() {
   return rows;
 }
 function filteredSegmentRows() {
-  const q = els.segSearch.value.trim().toLowerCase();
+  // Separate boxes, not one combined search — a GERK code and a segment
+  // number can share the same digits (Matej, 2026-11-19: typing "13881"
+  // matched both), so each box only searches its own column.
+  const qSeg = els.segSearchSeg.value.trim().toLowerCase();
+  const qGerk = els.segSearchGerk.value.trim().toLowerCase();
+  const qStranka = els.segSearchStranka.value.trim().toLowerCase();
   return allSegmentRows().filter(({ sample: s, gerk: g, order: o }) => {
     if (sledSegStatusFilterValues.size && !sledSegStatusFilterValues.has(orderStatusLabel(o))) return false;
-    if (!q) return true;
-    const hay = `${o.stevilka ?? ''} ${customerName(o.customers)} ${g.gerk_code ?? ''} ${g.fields?.name ?? ''} ${s.sample_no ?? ''}`.toLowerCase();
-    return hay.includes(q);
+    if (els.segHideBoxedCb.checked && segmentBoxed(s)) return false;
+    if (qSeg && !String(s.sample_no ?? '').toLowerCase().includes(qSeg)) return false;
+    if (qGerk && !`${g.gerk_code ?? ''} ${g.fields?.name ?? ''}`.toLowerCase().includes(qGerk)) return false;
+    if (qStranka && !customerName(o.customers).toLowerCase().includes(qStranka)) return false;
+    return true;
   });
 }
 
@@ -655,7 +758,10 @@ function renderSegmentRows() {
   }).join('');
   updateSegSelectAllState(rows.map(r => r.sample.id));
 }
-els.segSearch.addEventListener('input', renderSegmentRows);
+els.segSearchSeg.addEventListener('input', renderSegmentRows);
+els.segSearchGerk.addEventListener('input', renderSegmentRows);
+els.segSearchStranka.addEventListener('input', renderSegmentRows);
+els.segHideBoxedCb.addEventListener('change', renderSegmentRows);
 // Row click opens the segment's own order (same modal as the Naročila
 // view) — the checkbox and the Vzorčenje/Pošiljka <select>s must not also
 // trigger it.
@@ -695,7 +801,7 @@ els.segRows.addEventListener('change', async e => {
   if (!boxSel) return;
   const segId = boxSel.dataset.boxSelect;
   if (boxSel.value === '__new__') {
-    const label = prompt('Oznaka nove pošiljke:');
+    const label = prompt('Oznaka nove pošiljke:', suggestBoxLabel());
     if (!label || !label.trim()) { renderSegmentRows(); return; }
     const box = await createBox(label.trim());
     if (box) await assignSegmentToBox(segId, box.id);
@@ -791,6 +897,7 @@ async function bulkSetVzorcenje(value) {
     if (sample) sample.sampling_note = value;
   }
   renderSegmentRows();
+  clearSegSelection();
 }
 async function bulkAssignBox(boxId) {
   // Same lock rule as a single row's own box <select> — already-sent or
@@ -812,6 +919,7 @@ async function bulkAssignBox(boxId) {
   renderOrders();
   renderBoxesList();
   if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
+  clearSegSelection();
 }
 
 function buildSledSegSelectionBar() {
@@ -837,7 +945,7 @@ function buildSledSegSelectionBar() {
     if (v === '__placeholder__') return;
     let boxId = null;
     if (v === '__new__') {
-      const label = prompt('Oznaka nove pošiljke:');
+      const label = prompt('Oznaka nove pošiljke:', suggestBoxLabel());
       if (!label || !label.trim()) { e.target.value = '__placeholder__'; return; }
       const box = await createBox(label.trim());
       if (!box) { e.target.value = '__placeholder__'; return; }
@@ -984,11 +1092,13 @@ function renderOrderBoxes(order) {
       : `<span class="fert-badge fert-badge--warn">Odprta</span>`;
     const actions = [`<button type="button" class="btn btn-secondary btn-sm" data-print-box="${esc(box.id)}">Natisni</button>`];
     if (box.status === 'Odprta') actions.push(`<button type="button" class="btn btn-primary btn-sm" data-send-box="${esc(box.id)}">Zaključi in pošlji</button>`);
+    actions.push(`<button type="button" class="btn btn-secondary btn-sm" data-dpd-box="${esc(box.id)}">${box.dpd_tracking ? 'DPD ✓' : 'DPD'}</button>`);
     return `<tr>
       <td class="fert-strong">${esc(box.label)}</td>
       <td>${statusBadge}</td>
       <td class="fert-num">${nHere}</td>
       <td>${box.sent_at ? fmtDate(box.sent_at) : '—'}</td>
+      <td>${box.dpd_tracking ? esc(box.dpd_tracking) : '—'}</td>
       <td><div class="sled-row-actions">${actions.join('')}</div></td>
     </tr>`;
   }).join('');
@@ -1029,7 +1139,7 @@ els.orderGerks.addEventListener('change', async e => {
   if (!sel) return;
   const segId = sel.dataset.boxSelect;
   if (sel.value === '__new__') {
-    const label = prompt('Oznaka nove pošiljke:');
+    const label = prompt('Oznaka nove pošiljke:', suggestBoxLabel());
     if (!label || !label.trim()) { renderOrderGerks(orders.find(o => o.id === currentOrderId)); return; }
     const box = await createBox(label.trim());
     if (box) await assignSegmentToBox(segId, box.id);
@@ -1057,7 +1167,21 @@ async function assignSegmentToBox(segId, boxId) {
   renderBoxesList();
 }
 
+// Next free "BOXn" — suggested as the prompt's default, not forced (Matej,
+// 2026-11-19 still typed it by hand and got two boxes both named "BOX1").
+function suggestBoxLabel() {
+  const max = boxes.reduce((m, b) => {
+    const n = /^BOX(\d+)$/i.exec((b.label || '').trim())?.[1];
+    return n ? Math.max(m, parseInt(n, 10)) : m;
+  }, 0);
+  return `BOX${max + 1}`;
+}
+
 async function createBox(label) {
+  if (boxes.some(b => (b.label || '').trim().toLowerCase() === label.trim().toLowerCase())) {
+    alert(`Pošiljka z imenom "${label}" že obstaja — izberi drugo ime.`);
+    return null;
+  }
   const { data: { user } } = await supabase.auth.getUser();
   const { data, error } = await supabase.from('sample_boxes').insert({ label, created_by: user?.id ?? null }).select('*').single();
   if (error) { alert('Napaka pri ustvarjanju pošiljke: ' + error.message); return null; }
@@ -1075,6 +1199,52 @@ function samplesInBox(boxId) {
     .map(s => ({ ...s, stevilka: o.stevilka, stranka: customerName(o.customers), vzorceno: firstFieldStart(o) })));
 }
 
+// A box can leave the day before or after it's marked "zaključeno" in the
+// app — asking for the actual date (via a real calendar picker, not a text
+// prompt — Matej, 2026-11-19) instead of always stamping "now". Resolves
+// to an ISO timestamp (local noon, so fmtDate's plain
+// new Date(iso).getDate()/... can't shift it a day under any timezone), or
+// null if cancelled.
+function promptSendDate(defaultIso) {
+  return new Promise(resolve => {
+    els.sendDateInput.value = defaultIso;
+    showModal(els.sendDateModal);
+    function finish(result) {
+      hideModal(els.sendDateModal);
+      els.sendDateConfirmBtn.removeEventListener('click', onConfirm);
+      els.sendDateCancelBtn.removeEventListener('click', onCancel);
+      els.sendDateModalClose.removeEventListener('click', onCancel);
+      els.sendDateModal.removeEventListener('click', onBackdrop);
+      resolve(result);
+    }
+    function onConfirm() {
+      const val = els.sendDateInput.value;
+      if (!val) { alert('Izberi datum.'); return; }
+      const [y, m, d] = val.split('-').map(Number);
+      finish(new Date(y, m - 1, d, 12, 0, 0).toISOString());
+    }
+    function onCancel() { finish(null); }
+    function onBackdrop(e) { if (e.target === els.sendDateModal) finish(null); }
+    els.sendDateConfirmBtn.addEventListener('click', onConfirm);
+    els.sendDateCancelBtn.addEventListener('click', onCancel);
+    els.sendDateModalClose.addEventListener('click', onCancel);
+    els.sendDateModal.addEventListener('click', onBackdrop);
+  });
+}
+
+async function setDpdTracking(boxId) {
+  const box = boxes.find(b => b.id === boxId);
+  if (!box) return;
+  const input = prompt('DPD številka za sledenje pošiljke:', box.dpd_tracking || '');
+  if (input === null) return;
+  const value = input.trim() || null;
+  const { error } = await supabase.from('sample_boxes').update({ dpd_tracking: value }).eq('id', boxId);
+  if (error) { alert('Napaka: ' + error.message); return; }
+  box.dpd_tracking = value;
+  renderBoxesList();
+  if (currentOrderId) renderOrderModal(orders.find(o => o.id === currentOrderId));
+}
+
 // Shared by both box tables — the per-order one inside #sledOrderModal and
 // the global "Škatle" subview (Matej, 2026-11-11: "morda rabimo še ločen
 // podzavihek — urejanje škatle") — same actions either way, since a box can
@@ -1086,8 +1256,9 @@ async function handleBoxRowClick(e) {
     if (!box) return;
     const n = samplesInBox(box.id).length;
     if (!confirm(`Zaključiti in poslati pošiljko "${box.label}" (${n} vzorcev skupaj, lahko iz več naročil) laboratoriju?`)) return;
+    const sentAt = await promptSendDate(new Date().toISOString().slice(0, 10));
+    if (sentAt == null) return;
     const { data: { user } } = await supabase.auth.getUser();
-    const sentAt = new Date().toISOString();
     const { error } = await supabase.from('sample_boxes').update({ status: 'Poslano', sent_at: sentAt, sent_by: user?.id ?? null }).eq('id', box.id);
     if (error) { alert('Napaka: ' + error.message); return; }
     box.status = 'Poslano';
@@ -1103,6 +1274,8 @@ async function handleBoxRowClick(e) {
   }
   const printBtn = e.target.closest('[data-print-box]');
   if (printBtn) printBox(boxes.find(b => b.id === printBtn.dataset.printBox));
+  const dpdBtn = e.target.closest('[data-dpd-box]');
+  if (dpdBtn) return setDpdTracking(dpdBtn.dataset.dpdBox);
   const deleteBtn = e.target.closest('[data-delete-box]');
   if (deleteBtn) {
     const box = boxes.find(b => b.id === deleteBtn.dataset.deleteBox);
@@ -1131,10 +1304,16 @@ function filteredBoxesList() {
   if (!q) return boxes;
   return boxes.filter(b => (b.label || '').toLowerCase().includes(q));
 }
+function updateBoxSelectAllState(visibleIds) {
+  const checkedCount = visibleIds.filter(id => selectedBoxIds.has(id)).length;
+  els.boxSelectAllCb.checked = visibleIds.length > 0 && checkedCount === visibleIds.length;
+  els.boxSelectAllCb.indeterminate = checkedCount > 0 && checkedCount < visibleIds.length;
+}
 function renderBoxesList() {
   const rows = filteredBoxesList();
   if (!rows.length) {
-    els.boxRows.innerHTML = `<tr><td colspan="5" class="fert-empty">${boxes.length ? 'Ni zadetkov.' : 'Ni škatel.'}</td></tr>`;
+    els.boxRows.innerHTML = `<tr><td colspan="7" class="fert-empty">${boxes.length ? 'Ni zadetkov.' : 'Ni škatel.'}</td></tr>`;
+    updateBoxSelectAllState([]);
     return;
   }
   els.boxRows.innerHTML = rows.map(box => {
@@ -1144,21 +1323,42 @@ function renderBoxesList() {
       : `<span class="fert-badge fert-badge--warn">Odprta</span>`;
     const actions = [`<button type="button" class="btn btn-secondary btn-sm" data-print-box="${esc(box.id)}">Natisni</button>`];
     if (box.status === 'Odprta') actions.push(`<button type="button" class="btn btn-primary btn-sm" data-send-box="${esc(box.id)}">Zaključi in pošlji</button>`);
+    actions.push(`<button type="button" class="btn btn-secondary btn-sm" data-dpd-box="${esc(box.id)}">${box.dpd_tracking ? 'DPD ✓' : 'DPD'}</button>`);
     actions.push(`<button type="button" class="btn btn-secondary btn-sm fert-danger-text" data-delete-box="${esc(box.id)}">Briši</button>`);
     return `<tr data-open-box="${esc(box.id)}">
+      <td><input type="checkbox" class="sled-box-select-cb" data-id="${esc(box.id)}" aria-label="Izberi pošiljko" ${selectedBoxIds.has(box.id) ? 'checked' : ''}></td>
       <td class="fert-strong">${esc(box.label)}</td>
       <td>${statusBadge}</td>
       <td class="fert-num">${n}</td>
       <td>${box.sent_at ? fmtDate(box.sent_at) : '—'}</td>
+      <td>${box.dpd_tracking ? esc(box.dpd_tracking) : '—'}</td>
       <td><div class="sled-row-actions">${actions.join('')}</div></td>
     </tr>`;
   }).join('');
+  updateBoxSelectAllState(rows.map(b => b.id));
 }
 els.boxSearch.addEventListener('input', renderBoxesList);
 els.boxRows.addEventListener('click', e => {
+  if (e.target.closest('.sled-box-select-cb')) return;
   if (e.target.closest('button')) return handleBoxRowClick(e);
   const row = e.target.closest('tr[data-open-box]');
   if (row) openBoxModal(row.dataset.openBox);
+});
+els.boxRows.addEventListener('change', e => {
+  const cb = e.target.closest('.sled-box-select-cb');
+  if (!cb) return;
+  if (cb.checked) selectedBoxIds.add(cb.dataset.id);
+  else selectedBoxIds.delete(cb.dataset.id);
+  updateSledBoxSelectionBar();
+  updateBoxSelectAllState(filteredBoxesList().map(b => b.id));
+});
+els.boxSelectAllCb.addEventListener('click', () => {
+  const visible = filteredBoxesList();
+  const anySelected = visible.some(b => selectedBoxIds.has(b.id));
+  if (anySelected) visible.forEach(b => selectedBoxIds.delete(b.id));
+  else visible.forEach(b => selectedBoxIds.add(b.id));
+  renderBoxesList();
+  updateSledBoxSelectionBar();
 });
 
 function closeBoxModal() { hideModal(els.boxModal); }
@@ -1189,14 +1389,17 @@ function printBox(box) {
   if (box) printBoxes([box]);
 }
 
+// English, only Order + Segment (Matej, 2026-11-19) — the sheet that
+// physically travels with the box; the full Eurofins manifest (customer,
+// GERK, …) is a separate export (exportEurofinsBoxes below).
 function boxPageHtml(box, isLast) {
   const items = samplesInBox(box.id).sort((a, b) =>
     (a.stevilka || '').localeCompare(b.stevilka || '', 'sl', { numeric: true }) || (a.gerk_code || '').localeCompare(b.gerk_code || '', 'sl'));
   return `<section class="sled-print-page"${isLast ? '' : ' style="page-break-after: always;"'}>
-<h1>Pošiljka: ${esc(box.label)}</h1>
-<p class="meta">Status: ${esc(box.status)} · ${items.length} vzorcev · natisnjeno ${new Date().toLocaleString('sl-SI')}</p>
-<table><thead><tr><th>#</th><th>Nalog</th><th>Stranka</th><th>GERK</th><th>Vzorec</th></tr></thead>
-<tbody>${items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.stevilka)}</td><td>${esc(it.stranka)}</td><td>${esc(it.gerk_code)}</td><td>${esc(it.sample_no)}</td></tr>`).join('')}</tbody>
+<h1>Shipment: ${esc(box.label)}</h1>
+<p class="meta">${items.length} samples · printed ${new Date().toLocaleString('en-GB')}</p>
+<table><thead><tr><th>Order</th><th>Segment</th></tr></thead>
+<tbody>${items.map(it => `<tr><td>${esc(it.stevilka)}</td><td>${esc(it.sample_no)}</td></tr>`).join('')}</tbody>
 </table>
 </section>`;
 }
@@ -1231,6 +1434,101 @@ function printSelectedBoxes() {
   if (!boxIds.length) { alert('Izbrana naročila nimajo nobenega vzorca v pošiljki.'); return; }
   const boxList = boxIds.map(id => boxes.find(b => b.id === id)).filter(Boolean);
   printBoxes(boxList);
+}
+
+// ── Škatle — bulk selection + export (Matej, 2026-11-19): a plain
+// Order/Segment CSV (English headers) and the full Eurofins lab
+// submission form, both over whichever boxes are checked. ─────────────
+function exportSelectedBoxesSimple(boxList) {
+  const items = boxList.flatMap(b => samplesInBox(b.id));
+  if (!items.length) { alert('Izbrane pošiljke so prazne.'); return; }
+  const lines = [['Order', 'Segment'].map(csvField).join(';')];
+  for (const it of items) lines.push([it.stevilka ?? '', it.sample_no ?? ''].map(csvField).join(';'));
+  const csv = '﻿' + lines.join('\r\n');
+  downloadTextFile(`shipment_export_${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
+// xlsx matching Proagrar's existing manual submission form exactly
+// (Podatki/Proagrar_Eurofins_sample list_*.xlsx — same fixed labels/merges,
+// column B = sample code, E always 1, F always 'Extended', last row the
+// total count). Built with the same lazy SheetJS loader fertilization.js
+// uses for its own Excel export.
+const EUROFINS_TITLE = 'Talajmintavételi összesítő és laborvizsgálati megrendelő / Popis uzoraka tla i naručitelj laboratorijskih ispitivanja';
+function eurofinsSampleCode(sampleNo) {
+  const s = String(sampleNo ?? '').trim();
+  return /^\d+$/.test(s) ? Number(s) : s;
+}
+async function exportEurofinsBoxes(boxList) {
+  const items = boxList.flatMap(b => samplesInBox(b.id));
+  if (!items.length) { alert('Izbrane pošiljke so prazne.'); return; }
+  const rows = [
+    [EUROFINS_TITLE, '', '', '', '', ''],
+    ['', '', '', '', '', ''],
+    ['', '', '', '', '', ''],
+    ['Mintavételt végezte:/ Uzorkovanje je izvršio:', '', '', '', '', ''],
+    ['Jármű: / Registarski broj vozila', '', '', '', '', ''],
+    ['Dátum: / Datum:', '', '', '', '', ''],
+    ['Helye: / Mjesto uzorkovanja', 'SLOVENIA', '', '', '', ''],
+    ['Gazdaság: / Naziv tvrtke', 'Proagrar d.o.o.', '', '', '', ''],
+    ['Cím (ir, sz,, helység, utca, házszám):/ Adresa tvrtke:', '', '', '', '', ''],
+    ['Mintázott tábla / Identifikator područja s uzorkom', '', '', '', 'Minta (db)/\nuzorak (komad)', 'TVG Típusa / vrsta ispitivanja tla*'],
+    ['', '', '', '', '', ''],
+    ['Blokk azonosítója /\nIdentifikator površine zemljišta', 'Minta kódja / \nidentifikacijski kod uzorka', 'Neve/ Sorszáma \nBroj zemljišne čestice', 'Terület (ha)/ \nVeličina zemljišta (ha)', '', ''],
+  ];
+  for (const it of items) rows.push(['', eurofinsSampleCode(it.sample_no), '', '', 1, 'Extended']);
+  rows.push(['', '', '', '', items.length, '']);
+
+  const XLSX = await loadSheetJs();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },  // A1:F1
+    { s: { r: 9, c: 0 }, e: { r: 10, c: 3 } }, // A10:D11
+    { s: { r: 9, c: 4 }, e: { r: 11, c: 4 } }, // E10:E12
+    { s: { r: 9, c: 5 }, e: { r: 11, c: 5 } }, // F10:F12
+  ];
+  ws['!cols'] = [{ wch: 32 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 10 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Samples');
+  XLSX.writeFile(wb, `Eurofins_sample_list_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+function buildSledBoxSelectionBar() {
+  els.boxSelectionBar.setAttribute('role', 'toolbar');
+  els.boxSelectionBar.setAttribute('aria-label', 'Skupinska dejanja za izbrane pošiljke');
+  els.boxSelectionBar.innerHTML = `
+    <span class="wlg-sel-summary"></span>
+    <button type="button" class="wlg-sel-close" data-action="sled-box-sel-close" aria-label="Prekliči izbiro" title="Prekliči izbiro">${SEL_ICON_CLOSE}</button>
+    <span class="wlg-sel-sep" aria-hidden="true"></span>
+    <div class="wlg-sel-actions">
+      <button type="button" class="wlg-sel-action" data-action-id="sled-box-sel-export" aria-label="Izvozi izbrane pošiljke" title="Izvozi izbrane pošiljke (Order, Segment)">
+        ${SEL_ICON_DOWNLOAD}<span class="wlg-sel-action-label">Izvozi</span>
+      </button>
+      <button type="button" class="wlg-sel-action" data-action-id="sled-box-sel-eurofins" aria-label="Eurofins izvoz" title="Eurofins izvoz — prijavni list za laboratorij">
+        ${SEL_ICON_DOWNLOAD}<span class="wlg-sel-action-label">Eurofins izvoz</span>
+      </button>
+    </div>`;
+  els.boxSelectionBar.querySelector('[data-action="sled-box-sel-close"]').addEventListener('click', clearBoxSelection);
+  els.boxSelectionBar.querySelector('[data-action-id="sled-box-sel-export"]').addEventListener('click', () => {
+    exportSelectedBoxesSimple(boxes.filter(b => selectedBoxIds.has(b.id)));
+  });
+  els.boxSelectionBar.querySelector('[data-action-id="sled-box-sel-eurofins"]').addEventListener('click', () => {
+    exportEurofinsBoxes(boxes.filter(b => selectedBoxIds.has(b.id)));
+  });
+}
+buildSledBoxSelectionBar();
+
+function updateSledBoxSelectionBar() {
+  const n = selectedBoxIds.size;
+  els.boxSelectionBar.classList.toggle('wlg-selection-bar--visible', n > 0);
+  if (n === 0) return;
+  const summaryEl = els.boxSelectionBar.querySelector('.wlg-sel-summary');
+  if (summaryEl) summaryEl.textContent = `${n} ${n === 1 ? 'izbrana' : 'izbranih'}`;
+}
+function clearBoxSelection() {
+  selectedBoxIds = new Set();
+  els.boxRows.querySelectorAll('.sled-box-select-cb').forEach(cb => { cb.checked = false; });
+  updateSledBoxSelectionBar();
+  updateBoxSelectAllState(filteredBoxesList().map(b => b.id));
 }
 
 // app.js's switchTab() shows/hides #panelSledenje itself — this just

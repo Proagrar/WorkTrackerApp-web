@@ -269,7 +269,7 @@
             <label class="fert-field fert-field--narrow">
               <span class="field-label">Prikaz</span>
               <select id="fertLabMode" class="field-input fert-input">
-                <option value="linked">Povezani z nalogi</option>
+                <option value="linked">Vsi segmenti</option>
                 <option value="unlinked">Nepovezani</option>
               </select>
             </label>
@@ -312,6 +312,38 @@
       </section>
     </div>
 
+    <!-- ── Analize tal — ročno urejanje enega rezultata (manjkajočega ali
+         že uvoženega) — modal, odpre se z gumbom »Uredi« v stolpcu Vir
+         (Matej, 2026-11-20: "omogoči tudi ročno urejanje rezultatov analiz,
+         tam kjer manjkajo podatki, pa tudi na uvoženih"). Polja rendered
+         dinamično v fertilization.js (LAB_EDIT_FIELDS/renderLabEditFields). -->
+    <div id="fertLabEditModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="fertLabEditModalTitle">
+      <div class="modal-sheet modal-sheet-wide">
+        <div class="modal-handle" aria-hidden="true"></div>
+        <div class="modal-head">
+          <h3 id="fertLabEditModalTitle" class="modal-title">Uredi rezultat analize</h3>
+          <button id="fertLabEditModalClose" class="btn btn-icon" aria-label="Zapri">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <line x1="17" y1="3" x2="3" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="work-form">
+          <p id="fertLabEditSubtitle" class="fert-hint"></p>
+          <div id="fertLabEditFields" class="fert-form-grid"></div>
+          <div id="fertLabEditError" class="alert alert-error" hidden role="alert"></div>
+          <div class="form-actions">
+            <button type="button" id="fertLabEditCancelBtn" class="btn btn-secondary btn-flex">Prekliči</button>
+            <button type="button" id="fertLabEditSaveBtn" class="btn btn-primary btn-flex">
+              <span class="btn-label">Shrani</span>
+              <span class="btn-spinner" hidden aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Tab: Sledenje naročilom (admin-only) — track which sample
          (a GERK's segment == one delovni_nalogi_vzorci row) has been
          packed into which physical box, and send a box off to the lab.
@@ -345,8 +377,7 @@
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Plan"><span class="wo-gerk-check-code">Plan</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="V delu"><span class="wo-gerk-check-code">V delu</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Izvedeno" checked><span class="wo-gerk-check-code">Izvedeno</span></label>
-                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Pakiranje vzorcev"><span class="wo-gerk-check-code">Pakiranje vzorcev</span></label>
-                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Pripravljeni na pošiljanje"><span class="wo-gerk-check-code">Pripravljeni na pošiljanje</span></label>
+                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Paket v pripravi" checked><span class="wo-gerk-check-code">Paket v pripravi</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Poslani"><span class="wo-gerk-check-code">Poslani</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Delno prejeta analiza" checked><span class="wo-gerk-check-code">Delno prejeta analiza</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-status-filter-cb" value="Analiza prejeta" checked><span class="wo-gerk-check-code">Analiza prejeta</span></label>
@@ -377,8 +408,14 @@
             </div>
           </div>
           <div id="sledToolbarSegments" class="sled-sticky-bar-tools" hidden>
+            <label class="fert-field fert-field--narrow">
+              <input type="search" id="sledSegSearchSeg" class="field-input fert-input" placeholder="Segment">
+            </label>
+            <label class="fert-field fert-field--narrow">
+              <input type="search" id="sledSegSearchGerk" class="field-input fert-input" placeholder="GERK">
+            </label>
             <label class="fert-field">
-              <input type="search" id="sledSegSearch" class="field-input fert-input" placeholder="Nalog, stranka, GERK ali segment">
+              <input type="search" id="sledSegSearchStranka" class="field-input fert-input" placeholder="Stranka">
             </label>
             <!-- Same multi-select status filter as Naročila's own
                  (sledStatusFilterBtn/Menu) — filters by the order's
@@ -390,14 +427,16 @@
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Plan"><span class="wo-gerk-check-code">Plan</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="V delu"><span class="wo-gerk-check-code">V delu</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Izvedeno" checked><span class="wo-gerk-check-code">Izvedeno</span></label>
-                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Pakiranje vzorcev"><span class="wo-gerk-check-code">Pakiranje vzorcev</span></label>
-                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Pripravljeni na pošiljanje"><span class="wo-gerk-check-code">Pripravljeni na pošiljanje</span></label>
+                  <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Paket v pripravi" checked><span class="wo-gerk-check-code">Paket v pripravi</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Poslani"><span class="wo-gerk-check-code">Poslani</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Delno prejeta analiza" checked><span class="wo-gerk-check-code">Delno prejeta analiza</span></label>
                   <label class="wo-gerk-check-item"><input type="checkbox" class="sled-seg-status-filter-cb" value="Analiza prejeta" checked><span class="wo-gerk-check-code">Analiza prejeta</span></label>
                 </div>
               </div>
             </div>
+            <label class="reports-check" title="Skrij segmente, ki so že dodeljeni v kakšno pošiljko">
+              <input type="checkbox" id="sledSegHideBoxedCb"> Skrij že v pošiljki
+            </label>
           </div>
           <div id="sledToolbarBoxes" class="sled-sticky-bar-tools" hidden>
             <label class="fert-field">
@@ -439,7 +478,7 @@
         <div id="sledViewBoxes" class="fert-view" hidden>
           <div class="reports-table-wrap">
             <table class="evidenca-table fert-table sled-table">
-              <thead><tr><th>Oznaka</th><th>Status</th><th class="fert-num">Vzorcev</th><th title="Datum pošiljanja">Poslano</th><th></th></tr></thead>
+              <thead><tr><th><input type="checkbox" id="sledBoxSelectAllCb" aria-label="Izberi vse pošiljke"></th><th>Oznaka</th><th>Status</th><th class="fert-num">Vzorcev</th><th title="Datum pošiljanja">Poslano</th><th>DPD</th><th></th></tr></thead>
               <tbody id="sledBoxRows"></tbody>
             </table>
           </div>
@@ -469,7 +508,7 @@
             <h4 class="sled-gerk-title">Pošiljke v tem nalogu</h4>
             <div class="reports-table-wrap">
               <table class="evidenca-table fert-table">
-                <thead><tr><th>Oznaka</th><th>Status</th><th class="fert-num">Vzorcev (v tem nalogu)</th><th>Poslano</th><th></th></tr></thead>
+                <thead><tr><th>Oznaka</th><th>Status</th><th class="fert-num">Vzorcev (v tem nalogu)</th><th>Poslano</th><th>DPD</th><th></th></tr></thead>
                 <tbody id="sledOrderBoxRows"></tbody>
               </table>
             </div>
@@ -499,6 +538,37 @@
               <thead><tr><th>Segment</th><th>Delovni nalog</th><th>Stranka</th><th title="Datum vzorčenja">Vzorčeno</th></tr></thead>
               <tbody id="sledBoxContentRows"></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Sledenje naročilom — Pošiljke: "Zaključi in pošlji" vpraša za
+         dejanski datum pošiljanja (lahko včeraj ali jutri, ne nujno danes —
+         Matej, 2026-11-19) prek pravega koledarja (<input type="date">),
+         ne prek prompt()-a. promptSendDate() v shipping.js odpre to
+         modalno okno in vrne Promise, razrešen z izbranim datumom ali
+         null ob Prekliči. -->
+    <div id="sledSendDateModal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="sledSendDateModalTitle">
+      <div class="modal-sheet modal-sheet-compact">
+        <div class="modal-handle" aria-hidden="true"></div>
+        <div class="modal-head">
+          <h3 id="sledSendDateModalTitle" class="modal-title">Datum pošiljanja</h3>
+          <button id="sledSendDateModalClose" class="btn btn-icon" aria-label="Zapri">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <line x1="17" y1="3" x2="3" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="work-form">
+          <div class="field">
+            <label class="field-label" for="sledSendDateInput">Datum pošiljanja</label>
+            <input class="field-input" type="date" id="sledSendDateInput">
+          </div>
+          <div class="form-actions">
+            <button type="button" id="sledSendDateCancelBtn" class="btn btn-secondary btn-flex">Prekliči</button>
+            <button type="button" id="sledSendDateConfirmBtn" class="btn btn-primary btn-flex">Potrdi</button>
           </div>
         </div>
       </div>
@@ -914,6 +984,12 @@
        several selected segments at once (Vzorčenje / Pošiljka), content
        built by buildSledSegSelectionBar() in shipping.js (Matej, 2026-11-11). -->
   <div id="sledSegSelectionBar" class="wlg-selection-bar"></div>
+
+  <!-- Sledenje naročilom — Škatle: same floating bar, for bulk-exporting
+       several selected boxes at once (plain CSV "Izvozi" + the Eurofins
+       lab-template xlsx export), content built by buildSledBoxSelectionBar()
+       in shipping.js (Matej, 2026-11-19). -->
+  <div id="sledBoxSelectionBar" class="wlg-selection-bar"></div>
 
   <!-- Izračun gnojila — Načrti: same floating bar, one action (Izvozi) —
        exports the selected (already-made) fert_plan rows as an Excel file
@@ -1341,11 +1417,32 @@
           <div><dt>Sklic (v Minimaxu)</dt><dd id="ipSklic"></dd></div>
         </dl>
         <p class="invoice-preview-note">Aplikacija ne pošlje ničesar neposredno v Minimax — zabeleži se samo ta zahteva. Ločena skripta nato v Minimaxu ustvari <strong>prazen osnutek</strong> računa za zgornjega kupca.</p>
-        <table class="invoice-preview-table">
-          <thead><tr><th>GERK</th><th>Ha</th></tr></thead>
+        <p class="invoice-preview-meta" id="ipExistingRacuni" hidden></p>
+        <!-- Mode is locked in by this order's FIRST delovni_nalogi_racuni
+             row (DB trigger trg_racun_rezim_locked enforces it too) — the
+             chooser only shows before that first request; after it, only
+             the locked mode's screen shows (openInvoicePreviewModal sets
+             this). -->
+        <div class="field" id="ipRezimChooserWrap">
+          <span class="field-label">Način fakturiranja</span>
+          <div class="radio-group">
+            <label><input type="radio" name="ipRezim" value="gerki" id="ipRezimGerki" checked> Po GERK-ih</label>
+            <label><input type="radio" name="ipRezim" value="odstotek" id="ipRezimOdstotek"> Po deležu (%)</label>
+          </div>
+        </div>
+        <p class="invoice-preview-meta" id="ipRezimLockedNote" hidden></p>
+        <table class="invoice-preview-table" id="ipGerkModeWrap">
+          <thead><tr><th></th><th>GERK</th><th>Ha</th></tr></thead>
           <tbody id="ipGerkRows"></tbody>
-          <tfoot><tr><td>Skupaj</td><td id="ipGerkTotal"></td></tr></tfoot>
+          <tfoot><tr><td></td><td>Skupaj</td><td id="ipGerkTotal"></td></tr></tfoot>
         </table>
+        <div id="ipPercentModeWrap" hidden>
+          <p class="invoice-preview-meta" id="ipPercentRemainingNote"></p>
+          <label class="field">
+            <span class="field-label">Odstotek tega računa <span class="required">*</span></span>
+            <input type="number" id="ipPercentInput" class="field-input" min="0.01" max="100" step="0.01" placeholder="npr. 20">
+          </label>
+        </div>
         <p class="invoice-preview-meta" id="ipMeta"></p>
         <!-- Alternative to requesting an invoice — for work that's done but
              will never be invoiced (Matej, 2026-11-11). Deliberately does
